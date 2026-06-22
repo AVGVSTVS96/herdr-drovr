@@ -16,7 +16,7 @@ const path = require("node:path");
 
 const HB = process.env.HERDR_BIN_PATH || "herdr";
 const stateDir = process.env.HERDR_PLUGIN_STATE_DIR || process.cwd();
-const pluginId = process.env.HERDR_PLUGIN_ID || "avgvstvs96.tab-mover";
+const pluginId = process.env.HERDR_PLUGIN_ID || "tab-mover";
 
 function herdrJSON(args) {
   const r = spawnSync(HB, args, { encoding: "utf8" });

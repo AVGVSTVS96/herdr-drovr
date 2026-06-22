@@ -29,7 +29,7 @@ herdr plugin install AVGVSTVS96/herdr-tab-mover
 ```bash
 herdr plugin link /Users/bassimshahidy/Documents/GitHub/side-projects/herdr-tab-mover
 herdr plugin list
-herdr plugin action list --plugin avgvstvs96.tab-mover
+herdr plugin action list --plugin tab-mover
 ```
 
 ## keybinding
@@ -40,7 +40,7 @@ Plugin manifests cannot declare keys, so add this to `~/.config/herdr/config.tom
 [[keys.command]]
 key = "prefix+M"
 type = "plugin_action"
-command = "avgvstvs96.tab-mover.move-tab"
+command = "tab-mover.move-tab"
 description = "move tab to workspace"
 ```
 

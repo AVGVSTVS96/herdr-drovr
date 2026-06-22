@@ -12,7 +12,7 @@ function requireMatch(pattern, message) {
   }
 }
 
-requireMatch(/^id\s*=\s*"avgvstvs96\.tab-mover"\s*$/m, "missing publishable plugin id");
+requireMatch(/^id\s*=\s*"tab-mover"\s*$/m, "missing plugin id");
 requireMatch(/^name\s*=\s*"Tab Mover"\s*$/m, "missing name");
 requireMatch(/^version\s*=\s*"\d+\.\d+\.\d+"\s*$/m, "missing semver version");
 requireMatch(/^min_herdr_version\s*=\s*"0\.7\.0"\s*$/m, "missing minimum Herdr version");
