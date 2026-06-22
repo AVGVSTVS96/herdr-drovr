@@ -1,0 +1,20 @@
+{
+  "name": "herdr-tab-mover",
+  "version": "0.1.0",
+  "description": "Herdr plugin for moving the focused tab to another workspace with fzf while preserving live panes.",
+  "license": "MIT",
+  "private": false,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --check capture-and-open.js && node --check pick-and-move.js && node validate-manifest.js"
+  },
+  "keywords": [
+    "herdr",
+    "herdr-plugin",
+    "terminal",
+    "fzf"
+  ]
+}
