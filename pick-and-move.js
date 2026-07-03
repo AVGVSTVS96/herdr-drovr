@@ -135,6 +135,13 @@ function runPlan(planPath) {
   const newTab = first.pane.tab_id;
   const idMap = { [rootAnchor]: first.pane.pane_id };
 
+  // Follow the move now, before dismantling the rest of the source tab: the
+  // user watches the destination assemble instead of the source collapsing,
+  // and the empty-tab auto-close happens off-screen. Individual moves stay
+  // --no-focus so focus jumps exactly once.
+  herdrJSON(["workspace", "focus", first.pane.workspace_id]);
+  herdrJSON(["tab", "focus", newTab]);
+
   // 2) Walk the tree. For each split, carve the SECOND region out of the pane
   //    currently filling the node's region (the anchor of FIRST), then recurse.
   //    Herdr's --ratio is the fraction retained by the target (first) pane,
@@ -155,11 +162,6 @@ function runPlan(planPath) {
     place(node.second);
   }
   place(root);
-
-  // Follow the move: land the user in the tab's new home. Individual moves
-  // stay --no-focus so focus jumps once, at the end, not per pane.
-  herdrJSON(["workspace", "focus", first.pane.workspace_id]);
-  herdrJSON(["tab", "focus", newTab]);
 }
 
 function main() {
