@@ -61,14 +61,14 @@ The destination gets a new tab with the same label and split layout. If the sour
 
 ## how it works
 
-- `capture-and-open.js` runs as the headless plugin action. It records the focused tab id and exact `pane layout` snapshot before the picker exists, then opens the picker pane.
-- `pick-and-move.js` runs inside an overlay pane, so `fzf` has a real TTY. It reconstructs the layout tree from Herdr's flat `panes`/`splits` snapshot and moves panes into the destination by walking that tree.
+- `capture-and-open.js` runs as the headless plugin action. It takes an exact `pane layout` snapshot of the focused tab before the picker exists (the snapshot carries the tab and workspace ids), writes it to a per-invocation job file, and opens the picker pane with the job path in `TAB_MOVER_JOB`.
+- `pick-and-move.js` runs inside an overlay pane, so `fzf` has a real TTY. It reconstructs the layout tree by matching the rects Herdr actually reported (no ratio arithmetic), re-checks that every source pane still exists after the pick, then moves panes into the destination by walking that tree.
 - The script intentionally avoids focusing the moved tab after completion. Herdr may still choose a fallback focus if the active source tab empties.
 
 ## limitations
 
 - This is an overlay terminal picker, not a native right-click menu. Herdr plugin v1 does not support native menu injection or non-terminal UI.
-- There is no atomic `tab move` API, so this is implemented as multiple `pane move` calls. If a move fails after it starts, the plugin reports the failing command but does not currently roll back partial moves.
+- There is no atomic `tab move` API, so this is implemented as multiple `pane move` calls. The plugin re-validates all source panes right before moving, but if a move still fails partway it reports the failing command and does not roll back.
 - Destination choices exclude the source workspace.
 
 ## development
@@ -77,7 +77,7 @@ The destination gets a new tab with the same label and split layout. If the sour
 npm test
 ```
 
-That syntax-checks the JavaScript entrypoints and validates the plugin manifest is parseable TOML.
+That syntax-checks the JavaScript entrypoints, sanity-checks the manifest structure (including that declared commands point at real files), and runs unit tests for the layout-tree reconstruction.
 
 ## publishing
 

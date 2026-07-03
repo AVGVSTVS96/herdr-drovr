@@ -9,7 +9,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --check capture-and-open.js && node --check pick-and-move.js && node validate-manifest.js"
+    "test": "node --check capture-and-open.js && node --check pick-and-move.js && node validate-manifest.js && node test.js"
   },
   "keywords": [
     "herdr",

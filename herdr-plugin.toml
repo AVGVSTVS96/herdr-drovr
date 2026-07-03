@@ -16,7 +16,7 @@ command = ["node", "capture-and-open.js"]
 
 # The interactive surface. Plugins get no native UI, so the picker is a real
 # terminal pane (overlay) running fzf over `herdr workspace list`, then doing the
-# moves. It reads the job file the action wrote.
+# moves. It reads the job file whose path the action passes via TAB_MOVER_JOB.
 [[panes]]
 id = "picker"
 title = "Move tab to workspace"
