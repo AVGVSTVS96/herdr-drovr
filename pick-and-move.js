@@ -155,6 +155,11 @@ function runPlan(planPath) {
     place(node.second);
   }
   place(root);
+
+  // Follow the move: land the user in the tab's new home. Individual moves
+  // stay --no-focus so focus jumps once, at the end, not per pane.
+  herdrJSON(["workspace", "focus", first.pane.workspace_id]);
+  herdrJSON(["tab", "focus", newTab]);
 }
 
 function main() {
