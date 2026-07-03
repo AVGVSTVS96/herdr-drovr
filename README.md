@@ -57,6 +57,8 @@ herdr server reload-config
 3. pick a destination workspace in the overlay `fzf` picker, or choose `＋ new workspace`
 4. press enter to move, or escape to cancel
 
+The picker is keyboard-driven: type to filter, `enter` to move, `esc` to cancel. Single mouse clicks only highlight a row (fzf semantics), and clicking outside the overlay dismisses it without moving anything.
+
 The destination gets a new tab with the same label and split layout. If the source tab/workspace becomes empty, Herdr closes it.
 
 ## how it works
@@ -77,7 +79,7 @@ The destination gets a new tab with the same label and split layout. If the sour
 npm test
 ```
 
-That syntax-checks the JavaScript entrypoints, sanity-checks the manifest structure (including that declared commands point at real files), and runs unit tests for the layout-tree reconstruction.
+That syntax-checks the JavaScript entrypoints and runs unit tests for the layout-tree reconstruction.
 
 ## publishing
 

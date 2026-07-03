@@ -145,7 +145,13 @@ function main() {
   // from stdout. --with-nth=1 hides the tab-delimited workspace id column.
   const fzf = spawnSync(
     "fzf",
-    ["--prompt", "move tab to › ", "--delimiter", "\t", "--with-nth", "1", "--height", "100%"],
+    [
+      "--prompt", "move tab to › ",
+      "--header", "type to filter · enter moves · esc cancels (single clicks only highlight)",
+      "--delimiter", "\t",
+      "--with-nth", "1",
+      "--height", "100%",
+    ],
     { input: lines, encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] }
   );
   if (fzf.error) {
