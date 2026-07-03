@@ -15,6 +15,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const HB = process.env.HERDR_BIN_PATH || "herdr";
+
 const stateDir = process.env.HERDR_PLUGIN_STATE_DIR || process.cwd();
 const pluginId = process.env.HERDR_PLUGIN_ID || "tab-mover";
 

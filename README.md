@@ -64,7 +64,8 @@ The destination gets a new tab with the same label and split layout. If the sour
 ## how it works
 
 - `capture-and-open.js` runs as the headless plugin action. It takes an exact `pane layout` snapshot of the focused tab before the picker exists (the snapshot carries the tab and workspace ids), writes it to a per-invocation job file, and opens the picker pane with the job path in `TAB_MOVER_JOB`.
-- `pick-and-move.js` runs inside an overlay pane, so `fzf` has a real TTY. It reconstructs the layout tree by matching the rects Herdr actually reported (no ratio arithmetic), re-checks that every source pane still exists after the pick, then moves panes into the destination by walking that tree.
+- `pick-and-move.js` runs inside an overlay pane, so `fzf` has a real TTY. It reconstructs the layout tree by matching the rects Herdr actually reported (no ratio arithmetic) and re-checks that every source pane still exists after the pick.
+- The moves happen in a **detached second pass** (`TAB_MOVER_PLAN` mode of the same script). The overlay is attached to the very tab being moved, and Herdr silently no-ops (`changed: false`) any `pane move` out of a tab that still hosts the overlay — so the picker writes a plan, spawns itself detached, and exits to close the overlay, while the mover retries each move until the server actually performs it. Mover failures surface via `herdr notification show`.
 - The script intentionally avoids focusing the moved tab after completion. Herdr may still choose a fallback focus if the active source tab empties.
 
 ## limitations

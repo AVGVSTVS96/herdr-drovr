@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 // Picker pane command. Runs inside a real Herdr overlay pane (it has a TTY),
 // so fzf works here. Reads the layout snapshot the action wrote (path passed
-// via TAB_MOVER_JOB), asks the user which workspace to move the tab to, then
-// relocates the tab's live panes — preserving the exact split layout — using
-// `herdr pane move`.
+// via TAB_MOVER_JOB) and asks the user which workspace to move the tab to.
+//
+// The moves themselves happen in a DETACHED second pass (TAB_MOVER_PLAN mode):
+// the overlay is attached to the very tab being moved, and herdr silently
+// no-ops (`changed: false`) any `pane move` out of a tab that still hosts the
+// overlay. So the picker writes a plan, spawns this script detached, and
+// exits — closing the overlay — while the mover retries until the moves take.
 
 "use strict";
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 
 const HB = process.env.HERDR_BIN_PATH || "herdr";
+
 
 function herdrJSON(args) {
   const r = spawnSync(HB, args, { encoding: "utf8" });
@@ -101,6 +106,57 @@ function leavesOf(node, out = []) {
   return out;
 }
 
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// `pane move` exits 0 but reports `changed: false` while the source tab is
+// still pinned by the closing picker overlay — retry until the move takes.
+function moveUntilChanged(args, tries = 40) {
+  for (let i = 0; i < tries; i++) {
+    const r = herdrJSON(args).result.move_result;
+    if (r.changed) return r;
+    sleepMs(50);
+  }
+  throw new Error(`move kept getting refused: herdr ${args.join(" ")}`);
+}
+
+// Detached mover pass: perform the moves planned by the picker.
+function runPlan(planPath) {
+  const { root, tabLabel, toNewWorkspace, destWs } = JSON.parse(fs.readFileSync(planPath, "utf8"));
+  fs.unlinkSync(planPath);
+
+  // 1) Move the root anchor to create the destination tab.
+  const rootAnchor = anchorOf(root);
+  const firstArgs = toNewWorkspace
+    ? ["pane", "move", rootAnchor, "--new-workspace", "--label", tabLabel, "--tab-label", tabLabel, "--no-focus"]
+    : ["pane", "move", rootAnchor, "--new-tab", "--workspace", destWs, "--label", tabLabel, "--no-focus"];
+  const first = moveUntilChanged(firstArgs);
+  const newTab = first.pane.tab_id;
+  const idMap = { [rootAnchor]: first.pane.pane_id };
+
+  // 2) Walk the tree. For each split, carve the SECOND region out of the pane
+  //    currently filling the node's region (the anchor of FIRST), then recurse.
+  //    Herdr's --ratio is the fraction retained by the target (first) pane,
+  //    which is exactly LayoutNode.ratio. Directions ("right"/"down") map 1:1.
+  function place(node) {
+    if (node.type === "pane") return;
+    const secondOld = anchorOf(node.second);
+    const resp = moveUntilChanged([
+      "pane", "move", secondOld,
+      "--tab", newTab,
+      "--split", node.direction,
+      "--target-pane", idMap[anchorOf(node)],
+      "--ratio", String(node.ratio),
+      "--no-focus",
+    ]);
+    idMap[secondOld] = resp.pane.pane_id;
+    place(node.first);
+    place(node.second);
+  }
+  place(root);
+}
+
 function main() {
   const jobPath = process.env.TAB_MOVER_JOB;
   let snapshot;
@@ -147,7 +203,7 @@ function main() {
     "fzf",
     [
       "--prompt", "move tab to › ",
-      "--header", "type to filter · enter moves · esc cancels (single clicks only highlight)",
+      "--header", "type to filter · enter moves · esc cancels",
       "--delimiter", "\t",
       "--with-nth", "1",
       "--height", "100%",
@@ -174,50 +230,34 @@ function main() {
     return 1;
   }
 
+  // Hand the moves to a detached pass and exit, so the overlay closes and
+  // stops pinning the source tab. See header comment.
   const toNewWorkspace = choice === NEW_LABEL;
-  const destWs = toNewWorkspace ? null : choice.split("\t")[1];
-
-  // 1) Move the root anchor to create the destination tab.
-  const rootAnchor = anchorOf(root);
-  const firstArgs = toNewWorkspace
-    ? ["pane", "move", rootAnchor, "--new-workspace", "--label", tabLabel, "--tab-label", tabLabel, "--no-focus"]
-    : ["pane", "move", rootAnchor, "--new-tab", "--workspace", destWs, "--label", tabLabel, "--no-focus"];
-  const first = herdrJSON(firstArgs).result.move_result;
-  const newTab = first.pane.tab_id;
-  const idMap = { [rootAnchor]: first.pane.pane_id };
-
-  // 2) Walk the tree. For each split, carve the SECOND region out of the pane
-  //    currently filling the node's region (the anchor of FIRST), then recurse.
-  //    Herdr's --ratio is the fraction retained by the target (first) pane,
-  //    which is exactly LayoutNode.ratio. Directions ("right"/"down") map 1:1.
-  function place(node) {
-    if (node.type === "pane") return;
-    const hostOld = anchorOf(node);
-    const secondOld = anchorOf(node.second);
-    const hostNew = idMap[hostOld];
-    const resp = herdrJSON([
-      "pane", "move", secondOld,
-      "--tab", newTab,
-      "--split", node.direction,
-      "--target-pane", hostNew,
-      "--ratio", String(node.ratio),
-      "--no-focus",
-    ]).result.move_result;
-    idMap[secondOld] = resp.pane.pane_id;
-    place(node.first);
-    place(node.second);
-  }
-  place(root);
-
-  // Do not force focus. Moving the active tab may still cause Herdr to choose
-  // a fallback focus when the source tab empties, but the plugin should not add
-  // an extra jump after a successful move.
+  const planPath = jobPath.replace("job-", "plan-");
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({ root, tabLabel, toNewWorkspace, destWs: toNewWorkspace ? null : choice.split("\t")[1] })
+  );
+  spawn(process.execPath, [__filename], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, TAB_MOVER_PLAN: planPath },
+  }).unref();
   return 0;
 }
 
 module.exports = { rootFromFlatSnapshot, secondChildRect, anchorOf, leavesOf };
 
 if (require.main === module) {
+  if (process.env.TAB_MOVER_PLAN) {
+    try {
+      runPlan(process.env.TAB_MOVER_PLAN);
+    } catch (err) {
+      spawnSync(HB, ["notification", "show", "tab-mover: move failed", "--body", err.message]);
+      process.exit(1);
+    }
+    process.exit(0);
+  }
   try {
     process.exit(main());
   } catch (err) {
