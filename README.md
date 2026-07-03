@@ -1,40 +1,35 @@
 # herdr-tab-mover
 
-A Herdr plugin for moving the focused tab — its split layout *and* live panes/agents — to another workspace with an `fzf` picker.
+Move the focused tab, split layout **and** live panes/agents included, to another workspace, picked with `fzf`.
 
-It uses `herdr pane move`, not `layout apply`, so Claude/Pi/shell panes are relocated instead of respawned.
+Herdr has no built-in "move tab to workspace". Recreating the tab by reapplying its layout would respawn every pane, killing running Claude/Pi sessions and shells. This plugin relocates the *live* panes instead (`herdr pane move`), so everything keeps running exactly where it left off.
 
-## requirements
+<!-- TODO: record a short demo and drop it in ./assets/demo.gif
+![demo](./assets/demo.gif)
+-->
+
+## Features
+
+- 🚚 Moves the whole tab: label, split layout, and every running pane
+- 🤖 Live agents survive the move: panes are relocated, never respawned
+- 🔍 Overlay `fzf` picker: type to filter, `enter` to move, `esc` to cancel
+- ➕ Create a new workspace as the destination, right from the picker
+- 🎯 Focus follows the move: you land in the tab you just moved
+- ✅ Every move is verified against the server; failures surface as notifications
+
+## Requirements
 
 - Herdr `>= 0.7.0`
-- `node` on `PATH`
-- `fzf` on `PATH`
+- `node >= 18` on `PATH`
+- `fzf` on `PATH` (`brew install fzf` on macOS)
 
-macOS:
-
-```bash
-brew install fzf
-```
-
-## install
-
-### from github, after publishing
+## Installation
 
 ```bash
 herdr plugin install AVGVSTVS96/herdr-tab-mover
 ```
 
-### local development
-
-```bash
-herdr plugin link /Users/bassimshahidy/Documents/GitHub/side-projects/herdr-tab-mover
-herdr plugin list
-herdr plugin action list --plugin tab-mover
-```
-
-## keybinding
-
-Plugin manifests cannot declare keys, so add this to `~/.config/herdr/config.toml`:
+Plugin manifests can't declare keybindings, so add one to `~/.config/herdr/config.toml`:
 
 ```toml
 [[keys.command]]
@@ -50,45 +45,44 @@ Then reload Herdr config:
 herdr server reload-config
 ```
 
-## usage
+That's it.
 
-1. focus the tab you want to move
-2. press `prefix+M`
-3. pick a destination workspace in the overlay `fzf` picker, or choose `＋ new workspace`
-4. press enter to move, or escape to cancel
+## Usage
 
-The picker is keyboard-driven: type to filter, `enter` to move, `esc` to cancel. Single mouse clicks only highlight a row (fzf semantics), and clicking outside the overlay dismisses it without moving anything.
+1. Focus the tab you want to move
+2. Press `prefix+M`
+3. Pick a destination workspace, or choose `＋ new workspace`
 
-The destination gets a new tab with the same label and split layout. If the source tab/workspace becomes empty, Herdr closes it.
+Picker keys:
 
-## how it works
+- `type` - filter workspaces
+- `enter` - move the tab
+- `esc` - cancel
 
-- `capture-and-open.js` runs as the headless plugin action. It takes an exact `pane layout` snapshot of the focused tab before the picker exists (the snapshot carries the tab and workspace ids), writes it to a per-invocation job file, and opens the picker pane with the job path in `TAB_MOVER_JOB`.
-- `pick-and-move.js` runs inside an overlay pane, so `fzf` has a real TTY. It reconstructs the layout tree by matching the rects Herdr actually reported (no ratio arithmetic) and re-checks that every source pane still exists after the pick.
-- The moves happen in a **detached second pass** (`TAB_MOVER_PLAN` mode of the same script). The overlay is attached to the very tab being moved, and Herdr silently no-ops (`changed: false`) any `pane move` out of a tab that still hosts the overlay — so the picker writes a plan, spawns itself detached, and exits to close the overlay, while the mover retries each move until the server actually performs it. Mover failures surface via `herdr notification show`.
-- Focus follows the move: after the last pane lands, the mover focuses the destination workspace and tab, so you stay in the tab you just moved.
+The picker is keyboard-driven (fzf semantics): a single mouse click only highlights a row, and clicking outside the overlay dismisses it without moving anything. The destination gets a new tab with the same label and split layout. If the source tab or workspace becomes empty, Herdr closes it.
 
-## limitations
+## How it works
 
-- This is an overlay terminal picker, not a native right-click menu. Herdr plugin v1 does not support native menu injection or non-terminal UI.
-- There is no atomic `tab move` API, so this is implemented as multiple `pane move` calls. The plugin re-validates all source panes right before moving, but if a move still fails partway it reports the failing command and does not roll back.
-- Destination choices exclude the source workspace.
+- `capture-and-open.js` runs as the headless plugin action. It takes an exact `pane layout` snapshot of the focused tab *before* the picker exists (so the picker pane can never pollute the capture), writes it to a per-invocation job file, and opens the picker pane with the job path in `TAB_MOVER_JOB`.
+- `pick-and-move.js` runs inside an overlay pane, so `fzf` has a real TTY. It reconstructs the layout tree from the rects Herdr actually reported (no ratio arithmetic) and re-checks that every source pane still exists after the pick.
+- The moves happen in a **detached second pass** (`TAB_MOVER_PLAN` mode of the same script). The overlay is attached to the very tab being moved, and Herdr silently no-ops (`changed: false`) any `pane move` out of a tab that still hosts the overlay, so the picker writes a plan, spawns itself detached, and exits to close the overlay, while the mover retries each move until the server actually performs it. Mover failures surface via `herdr notification show`.
+- After the last pane lands, the mover focuses the destination workspace and tab.
 
-## development
+## Limitations
 
-```bash
-npm test
-```
+- The picker is an overlay terminal, not a native menu; Herdr plugin v1 has no native UI or menu injection.
+- There is no atomic `tab move` API, so the move is multiple `pane move` calls. Source panes are re-validated right before moving, but if a move still fails partway the plugin reports the failing command and does not roll back.
+- The source workspace is excluded from the destination list.
 
-That syntax-checks the JavaScript entrypoints and runs unit tests for the layout-tree reconstruction.
-
-## publishing
-
-1. create a GitHub repo, e.g. `AVGVSTVS96/herdr-tab-mover`
-2. push this repo
-3. add the GitHub topic `herdr-plugin`
-4. users install with:
+## Development
 
 ```bash
-herdr plugin install AVGVSTVS96/herdr-tab-mover
+git clone https://github.com/AVGVSTVS96/herdr-tab-mover
+herdr plugin link ./herdr-tab-mover
+herdr plugin action list --plugin tab-mover
+npm test   # syntax-checks the entrypoints and unit-tests the layout-tree reconstruction
 ```
+
+## License
+
+[MIT](LICENSE)

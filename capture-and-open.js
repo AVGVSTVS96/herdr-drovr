@@ -2,7 +2,7 @@
 // Action command (headless). Triggered by the keybinding.
 //
 // Captures the focused tab's exact layout snapshot BEFORE the picker pane is
-// created — so the picker can't contaminate the layout we reconstruct — then
+// created, so the picker can't contaminate the layout we reconstruct, then
 // writes a job file and opens the fzf picker pane, passing the job path to it
 // via TAB_MOVER_JOB. The snapshot itself carries tab_id/workspace_id, so it is
 // the single source of truth for what gets moved.

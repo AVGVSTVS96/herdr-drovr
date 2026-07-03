@@ -2,7 +2,7 @@ id = "tab-mover"
 name = "Tab Mover"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "Move the focused tab — its split layout and live agents — to another workspace, picked with fzf."
+description = "Move the focused tab, split layout and live agents included, to another workspace, picked with fzf."
 platforms = ["linux", "macos"]
 
 # Invoked by a keybinding (see README). Runs headless: it captures the focused

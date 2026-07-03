@@ -7,7 +7,7 @@
 // the overlay is attached to the very tab being moved, and herdr silently
 // no-ops (`changed: false`) any `pane move` out of a tab that still hosts the
 // overlay. So the picker writes a plan, spawns this script detached, and
-// exits — closing the overlay — while the mover retries until the moves take.
+// exits, closing the overlay, while the mover retries until the moves take.
 
 "use strict";
 const { spawn, spawnSync } = require("node:child_process");
@@ -31,7 +31,7 @@ function pause(msg) {
   try {
     fs.readSync(0, Buffer.alloc(64), 0, 64);
   } catch {
-    /* stdin closed — nothing to wait for */
+    /* stdin closed; nothing to wait for */
   }
 }
 
@@ -58,8 +58,8 @@ function secondChildRect(rects, area, direction) {
 }
 
 // Rebuild the split tree from Herdr's flat panes/splits snapshot. Every child
-// rect is looked up among the rects Herdr actually reported — never re-derived
-// from ratio arithmetic — so rounding can't desynchronize us from the server.
+// rect is looked up among the rects Herdr actually reported, never re-derived
+// from ratio arithmetic, so rounding can't desynchronize us from the server.
 function rootFromFlatSnapshot(snapshot) {
   if (!snapshot || !snapshot.area || !Array.isArray(snapshot.panes) || !Array.isArray(snapshot.splits)) {
     throw new Error("layout snapshot is missing area/panes/splits");
@@ -111,7 +111,7 @@ function sleepMs(ms) {
 }
 
 // `pane move` exits 0 but reports `changed: false` while the source tab is
-// still pinned by the closing picker overlay — retry until the move takes.
+// still pinned by the closing picker overlay; retry until the move takes.
 function moveUntilChanged(args, tries = 40) {
   for (let i = 0; i < tries; i++) {
     const r = herdrJSON(args).result.move_result;
