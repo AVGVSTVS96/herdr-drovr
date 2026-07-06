@@ -1,38 +1,38 @@
 #!/usr/bin/env node
-// Action command (headless). Triggered by the keybinding.
-//
-// Captures the focused tab's exact layout snapshot BEFORE the picker pane is
-// created, so the picker can't contaminate the layout we reconstruct, then
-// writes a job file and opens the fzf picker pane, passing the job path to it
-// via TAB_MOVER_JOB. The snapshot itself carries tab_id/workspace_id, so it is
-// the single source of truth for what gets moved.
-//
-// All Herdr calls go through HERDR_BIN_PATH so this stays portable.
+// Headless action behind the keybinding. Snapshots the focused tab's layout
+// BEFORE the picker pane exists (so the picker can't pollute the capture),
+// then opens the picker with the job file's path in TAB_MOVER_JOB.
 
-"use strict";
-const { spawnSync } = require("node:child_process");
-const fs = require("node:fs");
-const path = require("node:path");
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import type { JobSnapshot } from "./pick-and-move.ts";
 
 const HB = process.env.HERDR_BIN_PATH || "herdr";
 
 const stateDir = process.env.HERDR_PLUGIN_STATE_DIR || process.cwd();
 const pluginId = process.env.HERDR_PLUGIN_ID || "tab-mover";
 
-function herdrJSON(args) {
+interface PaneListResult {
+  panes: { pane_id: string; focused: boolean }[];
+}
+
+interface PaneLayoutResult {
+  layout: JobSnapshot;
+}
+
+function herdrJSON<T>(args: string[]): { result: T } {
   const r = spawnSync(HB, args, { encoding: "utf8" });
   if (r.status !== 0) {
     throw new Error(`herdr ${args.join(" ")} failed: ${(r.stderr || r.stdout || "").trim()}`);
   }
-  return JSON.parse(r.stdout);
+  return JSON.parse(r.stdout) as { result: T };
 }
 
 try {
-  // Prefer the invocation context; fall back to the focused pane if the
-  // keybinding didn't populate HERDR_PANE_ID.
   let pane = process.env.HERDR_PANE_ID;
   if (!pane) {
-    const focused = herdrJSON(["pane", "list"]).result.panes.find((p) => p.focused);
+    const focused = herdrJSON<PaneListResult>(["pane", "list"]).result.panes.find((p) => p.focused);
     if (!focused) {
       console.error("tab-mover: no focused pane to act on");
       process.exit(1);
@@ -40,7 +40,7 @@ try {
     pane = focused.pane_id;
   }
 
-  const snapshot = herdrJSON(["pane", "layout", "--pane", pane]).result.layout;
+  const snapshot = herdrJSON<PaneLayoutResult>(["pane", "layout", "--pane", pane]).result.layout;
 
   fs.mkdirSync(stateDir, { recursive: true });
   const jobPath = path.join(stateDir, `job-${process.pid}-${Date.now()}.json`);
@@ -60,6 +60,6 @@ try {
     throw new Error(`could not open picker: ${(open.stderr || open.stdout || "").trim()}`);
   }
 } catch (err) {
-  console.error("tab-mover (capture):", err.message);
+  console.error("tab-mover (capture):", err instanceof Error ? err.message : String(err));
   process.exit(1);
 }

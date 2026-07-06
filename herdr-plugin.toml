@@ -5,20 +5,16 @@ min_herdr_version = "0.7.0"
 description = "Move the focused tab, split layout and live agents included, to another workspace, picked with fzf."
 platforms = ["linux", "macos"]
 
-# Invoked by a keybinding (see README). Runs headless: it captures the focused
-# tab's id + exact layout snapshot BEFORE the picker exists (so the picker pane
-# can never pollute the captured layout), writes a job file, then opens the picker.
+# Headless; invoked by a keybinding (see README).
 [[actions]]
 id = "move-tab"
 title = "Move tab to workspace…"
 contexts = ["tab"]
-command = ["node", "capture-and-open.js"]
+command = ["node", "capture-and-open.ts"]
 
-# The interactive surface. Plugins get no native UI, so the picker is a real
-# terminal pane (overlay) running fzf over `herdr workspace list`, then doing the
-# moves. It reads the job file whose path the action passes via TAB_MOVER_JOB.
+# Plugin v1 has no native UI, so the picker is an overlay terminal pane.
 [[panes]]
 id = "picker"
 title = "Move tab to workspace"
 placement = "overlay"
-command = ["node", "pick-and-move.js"]
+command = ["node", "pick-and-move.ts"]

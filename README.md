@@ -20,7 +20,7 @@ Herdr has no built-in "move tab to workspace". Recreating the tab by reapplying 
 ## Requirements
 
 - Herdr `>= 0.7.0`
-- `node >= 18` on `PATH`
+- `node >= 23` on `PATH` (the plugin is written in TypeScript and relies on Node's native type stripping to run the `.ts` files directly; there is no build step)
 - `fzf` on `PATH` (`brew install fzf` on macOS)
 
 ## Installation
@@ -63,10 +63,10 @@ The picker is keyboard-driven (fzf semantics): a single mouse click only highlig
 
 ## How it works
 
-- `capture-and-open.js` runs as the headless plugin action. It takes an exact `pane layout` snapshot of the focused tab *before* the picker exists (so the picker pane can never pollute the capture), writes it to a per-invocation job file, and opens the picker pane with the job path in `TAB_MOVER_JOB`.
-- `pick-and-move.js` runs inside an overlay pane, so `fzf` has a real TTY. It reconstructs the layout tree from the rects Herdr actually reported (no ratio arithmetic) and re-checks that every source pane still exists after the pick.
+- `capture-and-open.ts` runs as the headless plugin action. It takes an exact `pane layout` snapshot of the focused tab *before* the picker exists (so the picker pane can never pollute the capture), writes it to a per-invocation job file, and opens the picker pane with the job path in `TAB_MOVER_JOB`.
+- `pick-and-move.ts` runs inside an overlay pane, so `fzf` has a real TTY. It reconstructs the layout tree from the rects Herdr actually reported (no ratio arithmetic) and re-checks that every source pane still exists after the pick.
 - The moves happen in a **detached second pass** (`TAB_MOVER_PLAN` mode of the same script). The overlay is attached to the very tab being moved, and Herdr silently no-ops (`changed: false`) any `pane move` out of a tab that still hosts the overlay, so the picker writes a plan, spawns itself detached, and exits to close the overlay, while the mover retries each move until the server actually performs it. Mover failures surface via `herdr notification show`.
-- After the last pane lands, the mover focuses the destination workspace and tab.
+- As soon as the first move creates the destination tab, the mover focuses the destination workspace and tab; you watch the tab assemble there while the source dismantles off-screen.
 
 ## Limitations
 
@@ -80,7 +80,8 @@ The picker is keyboard-driven (fzf semantics): a single mouse click only highlig
 git clone https://github.com/AVGVSTVS96/herdr-tab-mover
 herdr plugin link ./herdr-tab-mover
 herdr plugin action list --plugin tab-mover
-npm test   # syntax-checks the entrypoints and unit-tests the layout-tree reconstruction
+npm install   # dev-only: typescript for typechecking (the plugin itself has zero dependencies)
+npm test      # runs tsc --noEmit, then the layout-tree reconstruction tests
 ```
 
 ## License
