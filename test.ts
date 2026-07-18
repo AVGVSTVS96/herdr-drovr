@@ -1,8 +1,16 @@
 #!/usr/bin/env node
 import assert from "node:assert";
 import { test } from "node:test";
-import { rootFromFlatSnapshot, anchorOf, leavesOf } from "./pick-and-move.ts";
-import type { Rect, LayoutSnapshot, SnapshotPane, SplitNode } from "./pick-and-move.ts";
+import {
+  rootFromFlatSnapshot,
+  anchorOf,
+  leavesOf,
+  paneDestLines,
+  parsePaneChoice,
+  NEW_TAB_TOKEN,
+  NEW_WS_TOKEN,
+} from "./pick-and-move.ts";
+import type { Rect, LayoutSnapshot, SnapshotPane, SplitNode, TabEntry, WorkspaceEntry } from "./pick-and-move.ts";
 
 const rect = (x: number, y: number, width: number, height: number): Rect => ({ x, y, width, height });
 const pane = (pane_id: string, r: Rect): SnapshotPane => ({ pane_id, rect: r, focused: false });
@@ -83,4 +91,60 @@ test("a pane missing from the snapshot throws instead of misbuilding", () => {
 
 test("a malformed snapshot throws", () => {
   assert.throws(() => rootFromFlatSnapshot({} as LayoutSnapshot), /missing area\/panes\/splits/);
+});
+
+const tabs: TabEntry[] = [
+  { tab_id: "w1:t1", workspace_id: "w1", label: "src" },
+  { tab_id: "w1:t2", workspace_id: "w1", label: "logs" },
+  { tab_id: "w2:t1", workspace_id: "w2", label: "api" },
+  { tab_id: "w2:t2", workspace_id: "w2" },
+];
+const workspaces: WorkspaceEntry[] = [
+  { workspace_id: "w1", label: "web" },
+  { workspace_id: "w2", label: "backend" },
+];
+
+test("pane destinations exclude the source tab and stay within the source workspace by default", () => {
+  assert.deepStrictEqual(paneDestLines(tabs, workspaces, "w1:t1", "w1", false), [
+    `＋ new tab\t${NEW_TAB_TOKEN}`,
+    `＋ new workspace\t${NEW_WS_TOKEN}`,
+    "logs\ttab:w1:t2",
+  ]);
+});
+
+test("the all-workspaces view lists source-workspace tabs first and prefixes foreign tabs with their workspace label", () => {
+  assert.deepStrictEqual(paneDestLines(tabs, workspaces, "w1:t1", "w1", true), [
+    `＋ new tab\t${NEW_TAB_TOKEN}`,
+    `＋ new workspace\t${NEW_WS_TOKEN}`,
+    "logs\ttab:w1:t2",
+    "backend / api\ttab:w2:t1",
+    "backend / w2:t2\ttab:w2:t2",
+  ]);
+});
+
+test("enter confirms with a right split, alt-d with a down split, and tab ids with colons survive parsing", () => {
+  assert.deepStrictEqual(parsePaneChoice("", "logs\ttab:w1:t2"), {
+    direction: "right",
+    dest: { kind: "tab", tabId: "w1:t2" },
+  });
+  assert.deepStrictEqual(parsePaneChoice("alt-d", "logs\ttab:w1:t2"), {
+    direction: "down",
+    dest: { kind: "tab", tabId: "w1:t2" },
+  });
+});
+
+test("sentinel rows parse to new-tab and new-workspace destinations", () => {
+  assert.deepStrictEqual(parsePaneChoice("", `＋ new tab\t${NEW_TAB_TOKEN}`), {
+    direction: "right",
+    dest: { kind: "new-tab" },
+  });
+  assert.deepStrictEqual(parsePaneChoice("alt-d", `＋ new workspace\t${NEW_WS_TOKEN}`), {
+    direction: "down",
+    dest: { kind: "new-workspace" },
+  });
+});
+
+test("lines without a token or with an unknown token parse to null", () => {
+  assert.strictEqual(parsePaneChoice("", "no token here"), null);
+  assert.strictEqual(parsePaneChoice("", "label\tgarbage"), null);
 });

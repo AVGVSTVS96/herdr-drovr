@@ -1,7 +1,7 @@
 {
-  "name": "herdr-tab-mover",
-  "version": "0.1.0",
-  "description": "Herdr plugin for moving the focused tab to another workspace with fzf while preserving live panes and agents.",
+  "name": "herdr-drovr",
+  "version": "0.2.0",
+  "description": "Herdr plugin for driving the focused tab or pane anywhere with fzf while preserving live panes and agents.",
   "license": "MIT",
   "private": false,
   "type": "module",

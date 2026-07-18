@@ -1,20 +1,27 @@
-id = "tab-mover"
-name = "Tab Mover"
-version = "0.1.0"
+id = "drovr"
+name = "Drovr"
+version = "0.2.0"
 min_herdr_version = "0.7.0"
-description = "Move the focused tab, split layout and live agents included, to another workspace, picked with fzf."
+description = "Drive your herd: move the focused tab or pane, live agents included, anywhere with an fzf picker."
 platforms = ["linux", "macos"]
 
-# Headless; invoked by a keybinding (see README).
+# Headless; invoked by keybindings (see README).
 [[actions]]
 id = "move-tab"
 title = "Move tab to workspace…"
 contexts = ["tab"]
-command = ["node", "capture-and-open.ts"]
+command = ["node", "capture-and-open.ts", "tab"]
 
-# Plugin v1 has no native UI, so the picker is an overlay terminal pane.
+[[actions]]
+id = "move-pane"
+title = "Move pane to tab…"
+contexts = ["pane"]
+command = ["node", "capture-and-open.ts", "pane"]
+
+# Manifest declares the overlay fallback; capture-and-open upgrades the open
+# request to a floating popup on herdr >= 0.7.4.
 [[panes]]
 id = "picker"
-title = "Move tab to workspace"
+title = "Drovr"
 placement = "overlay"
 command = ["node", "pick-and-move.ts"]
