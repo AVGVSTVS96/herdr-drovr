@@ -1,14 +1,12 @@
 #!/usr/bin/env node
-// Picker (fzf needs the pane's TTY) plus a detached mover pass. On herdr
-// <= 0.7.3 the picker is an overlay pane inside the source tab, and herdr
-// no-ops any `pane move` out of a tab that still hosts the overlay, so the
-// picker writes a plan, respawns itself detached (DROVR_PLAN), and exits to
-// release the tab. On >= 0.7.4 the picker floats as a popup and nothing is
-// pinned, but the detached pass works identically there, so it stays the
-// single execution path.
+// Floating popup picker (herdr >= 0.7.4). A popup is a session resource, not
+// a pane in the source tab, so nothing pins the source layout: fzf gets the
+// popup's real TTY, and the moves run inline right after the pick.
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const HB = process.env.HERDR_BIN_PATH || "herdr";
 
@@ -55,15 +53,6 @@ export interface LayoutSnapshot {
   splits: SnapshotSplit[];
 }
 
-export interface JobSnapshot extends LayoutSnapshot {
-  tab_id: string;
-  workspace_id: string;
-}
-
-export type Job =
-  | ({ mode: "tab" } & JobSnapshot)
-  | { mode: "pane"; pane_id: string; tab_id: string; workspace_id: string };
-
 export interface TabEntry {
   tab_id: string;
   workspace_id: string;
@@ -87,30 +76,28 @@ interface WorkspaceListResult {
   workspaces: WorkspaceEntry[];
 }
 
+interface PaneLayoutResult {
+  layout: LayoutSnapshot & { tab_id: string; workspace_id: string };
+}
+
+interface PaneGetResult {
+  pane: { pane_id: string; tab_id: string; workspace_id: string };
+}
+
 interface MovedPane {
   pane_id: string;
   tab_id: string;
   workspace_id: string;
 }
 
-interface MoveResult {
-  changed: boolean;
-  pane: MovedPane;
-}
-
 interface PaneMoveResult {
-  move_result: MoveResult;
+  move_result: { changed: boolean; pane: MovedPane };
 }
 
 export type PaneDest =
   | { kind: "tab"; tabId: string }
   | { kind: "new-tab" }
   | { kind: "new-workspace" };
-
-type MovePlan =
-  | { mode: "tab"; root: LayoutNode; tabLabel: string; toNewWorkspace: true }
-  | { mode: "tab"; root: LayoutNode; tabLabel: string; toNewWorkspace: false; destWs: string }
-  | { mode: "pane"; paneId: string; srcWs: string; direction: SplitDirection; dest: PaneDest };
 
 function herdrJSON<T>(args: string[]): { result: T } {
   const r = spawnSync(HB, args, { encoding: "utf8" });
@@ -242,85 +229,21 @@ function parsePaneChoice(
   return null;
 }
 
-function sleepMs(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-// `pane move` exits 0 but reports `changed: false` while the source tab is
-// still pinned by the closing picker overlay; retry until the move takes.
-function moveUntilChanged(args: string[], tries = 40): MoveResult {
-  for (let i = 0; i < tries; i++) {
-    const r = herdrJSON<PaneMoveResult>(args).result.move_result;
-    if (r.changed) return r;
-    sleepMs(50);
+function move(args: string[]): MovedPane {
+  const r = herdrJSON<PaneMoveResult>(args).result.move_result;
+  if (!r.changed) {
+    throw new Error(`herdr refused the move: herdr ${args.join(" ")}`);
   }
-  throw new Error(`move kept getting refused: herdr ${args.join(" ")}`);
+  return r.pane;
 }
 
+// Focus is a nicety on top of an already-completed move; if the server
+// declines while the popup is up, the move still stands, so don't fail.
 function focusDestination(pane: MovedPane): void {
-  herdrJSON(["workspace", "focus", pane.workspace_id]);
-  herdrJSON(["tab", "focus", pane.tab_id]);
-}
-
-function executeTabMovePlan(plan: MovePlan & { mode: "tab" }): void {
-  const { root, tabLabel } = plan;
-
-  const rootAnchor = anchorOf(root);
-  const createDestinationTabArgs = plan.toNewWorkspace
-    ? ["pane", "move", rootAnchor, "--new-workspace", "--label", tabLabel, "--tab-label", tabLabel, "--no-focus"]
-    : ["pane", "move", rootAnchor, "--new-tab", "--workspace", plan.destWs, "--label", tabLabel, "--no-focus"];
-  const first = moveUntilChanged(createDestinationTabArgs);
-  const newTab = first.pane.tab_id;
-  const idMap: Record<string, string> = { [rootAnchor]: first.pane.pane_id };
-
-  // Focus the destination now: the user watches it assemble while the source
-  // dismantles off-screen. Pane moves stay --no-focus so focus jumps exactly once.
-  focusDestination(first.pane);
-
-  // For each split, carve the SECOND region out of the pane currently filling
-  // the node's region (the anchor of FIRST), then recurse. Herdr's --ratio is
-  // the fraction retained by the target (first) pane, which is exactly
-  // SplitNode.ratio; directions ("right"/"down") map 1:1.
-  function place(node: LayoutNode): void {
-    if (node.type === "pane") return;
-    const target = idMap[anchorOf(node)];
-    if (!target) {
-      throw new Error(`internal: anchor ${anchorOf(node)} was never placed`);
-    }
-    const secondOld = anchorOf(node.second);
-    const resp = moveUntilChanged([
-      "pane", "move", secondOld,
-      "--tab", newTab,
-      "--split", node.direction,
-      "--target-pane", target,
-      "--ratio", String(node.ratio),
-      "--no-focus",
-    ]);
-    idMap[secondOld] = resp.pane.pane_id;
-    place(node.first);
-    place(node.second);
-  }
-  place(root);
-}
-
-// Omitting --target-pane splits the destination tab's focused pane, which is
-// the intuitive landing spot.
-function executePaneMovePlan(plan: MovePlan & { mode: "pane" }): void {
-  const args =
-    plan.dest.kind === "tab"
-      ? ["pane", "move", plan.paneId, "--tab", plan.dest.tabId, "--split", plan.direction, "--no-focus"]
-      : plan.dest.kind === "new-tab"
-        ? ["pane", "move", plan.paneId, "--new-tab", "--workspace", plan.srcWs, "--no-focus"]
-        : ["pane", "move", plan.paneId, "--new-workspace", "--no-focus"];
-  const moved = moveUntilChanged(args);
-  focusDestination(moved.pane);
-}
-
-function executeMovePlan(planPath: string): void {
-  const plan = JSON.parse(fs.readFileSync(planPath, "utf8")) as MovePlan;
-  fs.unlinkSync(planPath);
-  if (plan.mode === "pane") executePaneMovePlan(plan);
-  else executeTabMovePlan(plan);
+  try {
+    herdrJSON(["workspace", "focus", pane.workspace_id]);
+    herdrJSON(["tab", "focus", pane.tab_id]);
+  } catch {}
 }
 
 // A failed label lookup falls back silently: the move matters more than the name.
@@ -336,11 +259,6 @@ function livePaneTabs(): Map<string, string> {
   return new Map(herdrJSON<PaneListResult>(["pane", "list"]).result.panes.map((p) => [p.pane_id, p.tab_id]));
 }
 
-function sourceTabStillIntact(root: LayoutNode, srcTab: string): boolean {
-  const live = livePaneTabs();
-  return leavesOf(root).every((id) => live.get(id) === srcTab);
-}
-
 const FZF_NO_MATCH = 1;
 const FZF_CANCELLED = 130;
 
@@ -349,6 +267,8 @@ interface FzfPick {
   stdout: string;
 }
 
+// fzf draws on /dev/tty, leaving stdin/stdout free for candidates and the
+// pick; --with-nth=1 hides the tab-delimited token column.
 function runFzf(args: string[], input: string): FzfPick {
   const fzf = spawnSync("fzf", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] });
   if (fzf.error) {
@@ -363,26 +283,11 @@ function runFzf(args: string[], input: string): FzfPick {
   return { outcome: "picked", stdout: fzf.stdout || "" };
 }
 
-function writePlanAndDetach(plan: MovePlan, jobPath: string): void {
-  const planPath = jobPath.replace("job-", "plan-");
-  fs.writeFileSync(planPath, JSON.stringify(plan));
-  spawn(process.execPath, [import.meta.filename], {
-    detached: true,
-    stdio: "ignore",
-    env: { ...process.env, DROVR_PLAN: planPath },
-  }).unref();
-}
-
-function pickTabMove(job: Job & { mode: "tab" }, jobPath: string): number {
-  let root: LayoutNode;
-  try {
-    root = rootFromFlatSnapshot(job);
-  } catch (err) {
-    keepPickerOpenUntilEnter(`drovr: could not reconstruct source layout: ${errorMessage(err)}`);
-    return 1;
-  }
-  const srcTab = job.tab_id;
-  const srcWs = job.workspace_id;
+function moveTabFlow(srcPane: string): number {
+  const snapshot = herdrJSON<PaneLayoutResult>(["pane", "layout", "--pane", srcPane]).result.layout;
+  const root = rootFromFlatSnapshot(snapshot);
+  const srcTab = snapshot.tab_id;
+  const srcWs = snapshot.workspace_id;
   const tabLabel = sourceTabLabel(srcTab);
 
   const destinations = herdrJSON<WorkspaceListResult>(["workspace", "list"]).result.workspaces.filter(
@@ -394,8 +299,6 @@ function pickTabMove(job: Job & { mode: "tab" }, jobPath: string): number {
     ...destinations.map((w) => `${w.label || w.workspace_id}\t${w.workspace_id}`),
   ].join("\n");
 
-  // fzf draws on /dev/tty, leaving stdin/stdout free for candidates and the
-  // pick; --with-nth=1 hides the tab-delimited workspace id column.
   const fzf = runFzf(
     [
       "--prompt", "move tab to › ",
@@ -411,36 +314,71 @@ function pickTabMove(job: Job & { mode: "tab" }, jobPath: string): number {
   const choice = fzf.stdout.trim();
   if (!choice) return 0;
 
-  if (!sourceTabStillIntact(root, srcTab)) {
+  // The popup is session-modal, so the user can't touch the layout while it
+  // is open, but sibling agents driving the CLI still can; re-validate.
+  const live = livePaneTabs();
+  if (!leavesOf(root).every((id) => live.get(id) === srcTab)) {
     keepPickerOpenUntilEnter("drovr: the source tab changed while the picker was open; nothing was moved.");
     return 1;
   }
 
-  let plan: MovePlan;
-  if (choice === NEW_LABEL) {
-    plan = { mode: "tab", root, tabLabel, toNewWorkspace: true };
-  } else {
-    const destWs = choice.split("\t")[1];
-    if (!destWs) {
-      keepPickerOpenUntilEnter(`drovr: could not parse the picked workspace: ${JSON.stringify(choice)}`);
-      return 1;
-    }
-    plan = { mode: "tab", root, tabLabel, toNewWorkspace: false, destWs };
+  const destWs = choice === NEW_LABEL ? null : choice.split("\t")[1];
+  if (choice !== NEW_LABEL && !destWs) {
+    keepPickerOpenUntilEnter(`drovr: could not parse the picked workspace: ${JSON.stringify(choice)}`);
+    return 1;
   }
-  writePlanAndDetach(plan, jobPath);
+
+  const rootAnchor = anchorOf(root);
+  const first = move(
+    destWs
+      ? ["pane", "move", rootAnchor, "--new-tab", "--workspace", destWs, "--label", tabLabel, "--no-focus"]
+      : ["pane", "move", rootAnchor, "--new-workspace", "--label", tabLabel, "--tab-label", tabLabel, "--no-focus"]
+  );
+  const newTab = first.tab_id;
+  const idMap: Record<string, string> = { [rootAnchor]: first.pane_id };
+
+  // Focus the destination now: it appears the instant the popup closes, and
+  // pane moves stay --no-focus so focus jumps exactly once.
+  focusDestination(first);
+
+  // For each split, carve the SECOND region out of the pane currently filling
+  // the node's region (the anchor of FIRST), then recurse. Herdr's --ratio is
+  // the fraction retained by the target (first) pane, which is exactly
+  // SplitNode.ratio; directions ("right"/"down") map 1:1.
+  function place(node: LayoutNode): void {
+    if (node.type === "pane") return;
+    const target = idMap[anchorOf(node)];
+    if (!target) {
+      throw new Error(`internal: anchor ${anchorOf(node)} was never placed`);
+    }
+    const secondOld = anchorOf(node.second);
+    const moved = move([
+      "pane", "move", secondOld,
+      "--tab", newTab,
+      "--split", node.direction,
+      "--target-pane", target,
+      "--ratio", String(node.ratio),
+      "--no-focus",
+    ]);
+    idMap[secondOld] = moved.pane_id;
+    place(node.first);
+    place(node.second);
+  }
+  place(root);
   return 0;
 }
 
-function pickPaneMove(job: Job & { mode: "pane" }, jobPath: string): number {
+function movePaneFlow(srcPane: string): number {
+  const src = herdrJSON<PaneGetResult>(["pane", "get", srcPane]).result.pane;
   const tabs = herdrJSON<TabListResult>(["tab", "list"]).result.tabs;
   const workspaces = herdrJSON<WorkspaceListResult>(["workspace", "list"]).result.workspaces;
 
-  const currentLines = paneDestLines(tabs, workspaces, job.tab_id, job.workspace_id, false);
-  const allLines = paneDestLines(tabs, workspaces, job.tab_id, job.workspace_id, true);
+  const currentLines = paneDestLines(tabs, workspaces, src.tab_id, src.workspace_id, false);
+  const allLines = paneDestLines(tabs, workspaces, src.tab_id, src.workspace_id, true);
 
   // ctrl-t reloads the full cross-workspace list from a pre-written file
   // (fzf's reload runs a command, so piped stdin alone can't feed it).
-  const allPath = jobPath.replace("job-", "tabs-");
+  const allPath = path.join(os.tmpdir(), `drovr-tabs-${process.pid}.txt`);
   fs.writeFileSync(allPath, allLines.join("\n"));
   try {
     const fzf = runFzf(
@@ -467,15 +405,21 @@ function pickPaneMove(job: Job & { mode: "pane" }, jobPath: string): number {
       return 1;
     }
 
-    if (livePaneTabs().get(job.pane_id) !== job.tab_id) {
+    if (livePaneTabs().get(src.pane_id) !== src.tab_id) {
       keepPickerOpenUntilEnter("drovr: the source pane changed while the picker was open; nothing was moved.");
       return 1;
     }
 
-    writePlanAndDetach(
-      { mode: "pane", paneId: job.pane_id, srcWs: job.workspace_id, direction: choice.direction, dest: choice.dest },
-      jobPath
+    // Omitting --target-pane splits the destination tab's focused pane, which
+    // is the intuitive landing spot.
+    const moved = move(
+      choice.dest.kind === "tab"
+        ? ["pane", "move", src.pane_id, "--tab", choice.dest.tabId, "--split", choice.direction, "--no-focus"]
+        : choice.dest.kind === "new-tab"
+          ? ["pane", "move", src.pane_id, "--new-tab", "--workspace", src.workspace_id, "--no-focus"]
+          : ["pane", "move", src.pane_id, "--new-workspace", "--no-focus"]
     );
+    focusDestination(moved);
     return 0;
   } finally {
     try {
@@ -485,31 +429,18 @@ function pickPaneMove(job: Job & { mode: "pane" }, jobPath: string): number {
 }
 
 function main(): number {
-  const jobPath = process.env.DROVR_JOB;
-  let job: Job;
-  try {
-    if (!jobPath) throw new Error("DROVR_JOB is not set");
-    job = JSON.parse(fs.readFileSync(jobPath, "utf8")) as Job;
-    fs.unlinkSync(jobPath);
-  } catch {
-    keepPickerOpenUntilEnter("drovr: no pending job (run a drovr action, not this pane directly).");
+  const mode = process.env.DROVR_MODE;
+  const pane = process.env.DROVR_PANE;
+  if (!mode || !pane) {
+    keepPickerOpenUntilEnter("drovr: no move context (run a drovr action, not this pane directly).");
     return 1;
   }
-  return job.mode === "pane" ? pickPaneMove(job, jobPath) : pickTabMove(job, jobPath);
+  return mode === "pane" ? movePaneFlow(pane) : moveTabFlow(pane);
 }
 
 export { rootFromFlatSnapshot, secondChildRect, anchorOf, leavesOf, paneDestLines, parsePaneChoice };
 
 if (process.argv[1] === import.meta.filename) {
-  if (process.env.DROVR_PLAN) {
-    try {
-      executeMovePlan(process.env.DROVR_PLAN);
-    } catch (err) {
-      spawnSync(HB, ["notification", "show", "drovr: move failed", "--body", errorMessage(err)]);
-      process.exit(1);
-    }
-    process.exit(0);
-  }
   try {
     process.exit(main());
   } catch (err) {

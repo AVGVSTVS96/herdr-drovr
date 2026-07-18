@@ -1,6 +1,6 @@
 # drovr
 
-A [drover](https://en.wikipedia.org/wiki/Drover_(Australian)) moves herds between places. **drovr** does the same for your [herdr](https://herdr.dev) panes: move the focused **tab** to another workspace, or the focused **pane** into any tab, split layout **and** live agents included, picked with `fzf`.
+A [drover](https://en.wikipedia.org/wiki/Drover_(Australian)) moves herds between places. **drovr** does the same for your [herdr](https://herdr.dev) panes: move the focused **tab** to another workspace, or the focused **pane** into any tab, split layout **and** live agents included, picked with `fzf` in a floating panel.
 
 Herdr has no built-in "move tab to workspace". Recreating a tab by reapplying its layout would respawn every pane, killing running Claude/Pi sessions and shells. drovr relocates the *live* panes instead (`herdr pane move`), so everything keeps running exactly where it left off.
 
@@ -13,15 +13,14 @@ Herdr has no built-in "move tab to workspace". Recreating a tab by reapplying it
 - 🚚 **Move tabs**: label, split layout, and every running pane relocate to another workspace
 - 📦 **Move panes**: send the focused pane into any tab, split right or down, or into a fresh tab/workspace
 - 🤖 Live agents survive every move: panes are relocated, never respawned
-- 🔍 Overlay `fzf` picker: type to filter, `enter` to move, `esc` to cancel
-- 🎈 Floating picker on herdr ≥ 0.7.4: opens as a popup panel; older versions automatically fall back to the zoomed overlay
+- 🎈 Floating `fzf` picker: type to filter, `enter` to move, `esc` to cancel; the tiled layout never shifts
 - 🌐 `ctrl-t` in the pane picker reveals every workspace's tabs as destinations
 - 🎯 Focus follows the move: you land where your pane or tab just arrived
-- ✅ Every move is verified against the server; failures surface as notifications
+- ✅ Every move is verified against the server; failures surface right in the picker
 
 ## Requirements
 
-- Herdr `>= 0.7.0` (`>= 0.7.4` for the floating picker)
+- Herdr `>= 0.7.4` (the picker is a floating popup panel, introduced in 0.7.4)
 - `node >= 23` on `PATH` (the plugin is written in TypeScript and relies on Node's native type stripping to run the `.ts` files directly; there is no build step)
 - `fzf` on `PATH` (`brew install fzf` on macOS)
 
@@ -77,19 +76,19 @@ Pane picker keys:
 - `ctrl-t` - show every workspace's tabs, not just the current workspace's
 - `esc` - cancel
 
-The picker is keyboard-driven (fzf semantics): a single mouse click only highlights a row, and clicking outside dismisses it without moving anything. If the source tab or workspace becomes empty after a move, Herdr closes it.
+The picker is keyboard-driven (fzf semantics): a single mouse click only highlights a row. If the source tab or workspace becomes empty after a move, Herdr closes it.
 
 ## How it works
 
-- `capture-and-open.ts` runs as the headless plugin action. It captures what is being moved *before* the picker exists (so the picker can never pollute the capture): an exact `pane layout` snapshot for tab moves, the pane's identity for pane moves. It writes a per-invocation job file and opens the picker with the job path in `DROVR_JOB`. The open request asks for a floating `popup` placement first; servers older than 0.7.4 reject that placement, and it falls back to the manifest's zoomed overlay.
-- `pick-and-move.ts` runs inside the picker pane, so `fzf` has a real TTY. For tab moves it reconstructs the layout tree from the rects Herdr actually reported (no ratio arithmetic); for pane moves it lists destination tabs. Either way it re-checks that the source still exists after the pick.
-- The moves happen in a **detached second pass** (`DROVR_PLAN` mode of the same script). Under the overlay fallback, the picker is attached to the very tab being moved out of, and Herdr silently no-ops (`changed: false`) any `pane move` out of a tab that still hosts the overlay; the picker therefore writes a plan, spawns itself detached, and exits to close the overlay, while the mover retries each move until the server actually performs it. Under the 0.7.4+ popup nothing is pinned and the retries simply succeed immediately, so one execution path serves both. Mover failures surface via `herdr notification show`.
-- Pane moves into an existing tab use `pane move --tab <id> --split right|down` without `--target-pane`, which splits the destination tab's focused pane, the intuitive landing spot.
-- For tab moves, as soon as the first move creates the destination tab, the mover focuses the destination workspace and tab; you watch the tab assemble there while the source dismantles off-screen.
+- `open-picker.ts` runs as the headless plugin action: it resolves the focused pane and opens the picker popup with the move context (`DROVR_MODE`, `DROVR_PANE`) in its environment.
+- `pick-and-move.ts` runs inside the popup, so `fzf` has a real TTY. A popup is a session resource, not a pane in the source tab, so nothing pins the source layout and the moves run **inline right after the pick**, no second process, no retries.
+- Tab moves reconstruct the layout tree from the rects Herdr actually reported (no ratio arithmetic), re-validate that every source pane still exists after the pick, then replay the tree in the destination: one `pane move --new-tab`/`--new-workspace` for the anchor, then one `pane move --split` per split node with the exact direction and ratio.
+- Pane moves are a single `pane move --tab <id> --split right|down`. `--target-pane` is omitted, which splits the destination tab's focused pane, the intuitive landing spot.
+- The destination is focused as soon as it exists, so it is front and center the instant the popup closes.
 
 ## Limitations
 
-- The picker is a terminal pane (floating popup on 0.7.4+, zoomed overlay before), not a native menu; Herdr plugin v1 has no native UI or menu injection.
+- The picker is a floating terminal popup, not a native menu; Herdr plugin v1 has no native UI or menu injection.
 - There is no atomic `tab move` API, so a tab move is multiple `pane move` calls. Source panes are re-validated right before moving, but if a move still fails partway the plugin reports the failing command and does not roll back.
 - The tab picker excludes the source workspace; the pane picker excludes the source tab.
 - `ctrl-t` in the pane picker is one-way; press `esc` and reopen to go back to the current workspace's tabs.
