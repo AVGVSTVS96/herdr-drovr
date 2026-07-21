@@ -1,6 +1,6 @@
 {
   "name": "herdr-drovr",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Herdr plugin for driving the focused tab or pane anywhere with fzf while preserving live panes and agents.",
   "license": "MIT",
   "private": false,

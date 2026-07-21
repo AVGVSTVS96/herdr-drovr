@@ -329,6 +329,12 @@ exit 0
 `;
 }
 
+// Reload on every keystroke, debounced: fzf kills the pending reload when the
+// next change fires, so the sleep coalesces fast typing into one search.
+function reloadOnChange(searchSh: string): string[] {
+  return ["--bind", `change:reload(sleep 0.05; sh '${searchSh}' {q})`];
+}
+
 interface FzfPick {
   outcome: "picked" | "cancelled" | "failed";
   stdout: string;
@@ -379,7 +385,7 @@ function moveTabFlow(srcPane: string): number {
         "--with-nth", "1",
         "--print-query",
         "--disabled",
-        "--bind", `change:reload(sh '${searchSh}' {q})`,
+        ...reloadOnChange(searchSh),
       ],
       [...wsRows, mutedRow("＋ new workspace", NEW_WS_TOKEN)].join("\n")
     );
@@ -489,7 +495,7 @@ function movePaneFlow(srcPane: string): number {
         "--print-query",
         "--disabled",
         "--expect", "alt-d",
-        "--bind", `change:reload(sh '${searchSh}' {q})`,
+        ...reloadOnChange(searchSh),
         "--bind", `ctrl-t:transform[${toggle}]+reload(sh '${searchSh}' {q})`,
       ],
       [...currentLines, mutedRow("＋ new tab", NEW_TAB_TOKEN), mutedRow("＋ new workspace", NEW_WS_TOKEN)].join("\n")
