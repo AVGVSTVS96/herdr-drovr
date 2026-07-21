@@ -270,10 +270,14 @@ const FZF_CANCELLED = 130;
 // fzf reserves the last content column on the input/info row, so the rule and
 // count stop one column short of the content edge. --scrollbar reserves that
 // same column in the list, pulling the highlight bar back to the rule's edge;
-// it stays load-bearing even when nothing scrolls. Padding is 2 left / 0
-// right: the scrollbar slot plus the column herdr's popup insets on the right
-// add back 2, so both gaps render even. gutter:8 mutes the per-line ▌ bar;
-// the pointer stays accent blue.
+// it stays load-bearing even when nothing scrolls.
+//
+// The gaps must match in pixels, not cells, and vertical padding only comes in
+// whole rows: 1 row of padding plus half the border row is ~1.5 cell heights,
+// which is ~3.5 cell widths at typical font aspect. So each side carries 3
+// blank columns to meet it: 3 of left padding; 1 of right padding plus the
+// scrollbar slot plus the column herdr's popup insets on the right. gutter:8
+// mutes the per-line ▌ bar; the pointer stays accent blue.
 const FZF_STYLE = [
   "--layout", "reverse",
   "--info", "inline-right",
@@ -281,16 +285,16 @@ const FZF_STYLE = [
   "--pointer", "▌",
   "--highlight-line",
   "--ansi",
-  "--padding", "1,0,1,2",
+  "--padding", "1,1,1,3",
   "--footer-border", "none",
   "--color", "16,bg:-1,gutter:8,bg+:0,fg:7,fg+:15,hl:4,hl+:12,prompt:4,pointer:4,input-fg:15,info:8,footer:8,separator:8,spinner:8,scrollbar:8",
 ];
 
 // Key hints, one per line, right-aligned to the same boundary as the rule and
-// highlight bar: columns minus 5 (2 left padding + 3 fzf reserves around
+// highlight bar: columns minus 7 (4 horizontal padding + 3 fzf reserves around
 // footer lines; measured, stdout is the popup TTY).
 function footer(lines: string[]): string {
-  const w = (process.stdout.columns ?? 62) - 5;
+  const w = (process.stdout.columns ?? 62) - 7;
   return lines.map((l) => l.padStart(w)).join("\n");
 }
 
