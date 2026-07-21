@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Headless action behind the keybindings: resolves the focused pane and
-// opens the floating picker with the move context in its environment.
+// opens the floating picker, sized to its content, with the move context
+// in its environment.
 //
 // Modes (argv[2]): "tab" moves the pane's whole tab; "pane" moves just the pane.
 
@@ -13,16 +14,35 @@ interface PaneListResult {
   panes: { pane_id: string; focused: boolean }[];
 }
 
+function herdrJSON<T>(args: string[]): { result: T } {
+  const r = spawnSync(HB, args, { encoding: "utf8" });
+  if (r.status !== 0) {
+    throw new Error(`herdr ${args.join(" ")} failed: ${(r.stderr || r.stdout || "").trim()}`);
+  }
+  return JSON.parse(r.stdout) as { result: T };
+}
+
+// Popup outer size: command-palette width, height fitted to the largest list
+// this run can show (ctrl-t widens the pane list, and popups don't resize
+// once open). Any listing failure falls back to the manifest defaults.
+const WIDTH = 64;
+const CHROME = 7; // popup border + fzf padding + prompt + separator + header
+
+function listRows(mode: string): number {
+  if (mode === "pane") {
+    // All tabs minus the source, plus the two sentinel rows.
+    return herdrJSON<{ tabs: unknown[] }>(["tab", "list"]).result.tabs.length + 1;
+  }
+  // Workspaces minus the source, plus the new-workspace sentinel.
+  return herdrJSON<{ workspaces: unknown[] }>(["workspace", "list"]).result.workspaces.length;
+}
+
 try {
   const mode = process.argv[2] === "pane" ? "pane" : "tab";
 
   let pane = process.env.HERDR_PANE_ID;
   if (!pane) {
-    const list = spawnSync(HB, ["pane", "list"], { encoding: "utf8" });
-    if (list.status !== 0) {
-      throw new Error(`herdr pane list failed: ${(list.stderr || list.stdout || "").trim()}`);
-    }
-    const focused = (JSON.parse(list.stdout) as { result: PaneListResult }).result.panes.find((p) => p.focused);
+    const focused = herdrJSON<PaneListResult>(["pane", "list"]).result.panes.find((p) => p.focused);
     if (!focused) {
       console.error("drovr: no focused pane to act on");
       process.exit(1);
@@ -30,12 +50,19 @@ try {
     pane = focused.pane_id;
   }
 
+  const sizeArgs: string[] = [];
+  try {
+    const height = Math.min(Math.max(listRows(mode) + CHROME, 11), 26);
+    sizeArgs.push("--width", String(WIDTH), "--height", String(height));
+  } catch {}
+
   const open = spawnSync(
     HB,
     [
       "plugin", "pane", "open",
       "--plugin", pluginId,
       "--entrypoint", "picker",
+      ...sizeArgs,
       "--env", `DROVR_MODE=${mode}`,
       "--env", `DROVR_PANE=${pane}`,
     ],

@@ -14,7 +14,7 @@ Herdr has no built-in "move tab to workspace". Recreating a tab by reapplying it
 - 📦 **Move panes**: send the focused pane into any tab, split right or down, or into a fresh tab/workspace
 - 🤖 Live agents survive every move: panes are relocated, never respawned
 - 🎈 Floating `fzf` picker: type to filter, `enter` to move, `esc` to cancel; the tiled layout never shifts
-- 🌐 `ctrl-t` in the pane picker reveals every workspace's tabs as destinations
+- 🌐 `ctrl-t` in the pane picker toggles every workspace's tabs as destinations
 - 🎯 Focus follows the move: you land where your pane or tab just arrived
 - ✅ Every move is verified against the server; failures surface right in the picker
 
@@ -73,7 +73,7 @@ Pane picker keys:
 - `type` - filter destinations
 - `enter` - move, splitting the destination's focused pane **right**
 - `alt-d` - move, splitting **down** instead
-- `ctrl-t` - show every workspace's tabs, not just the current workspace's
+- `ctrl-t` - toggle between the current workspace's tabs and every workspace's
 - `esc` - cancel
 
 The picker is keyboard-driven (fzf semantics): a single mouse click only highlights a row. If the source tab or workspace becomes empty after a move, Herdr closes it.
@@ -91,7 +91,6 @@ The picker is keyboard-driven (fzf semantics): a single mouse click only highlig
 - The picker is a floating terminal popup, not a native menu; Herdr plugin v1 has no native UI or menu injection.
 - There is no atomic `tab move` API, so a tab move is multiple `pane move` calls. Source panes are re-validated right before moving, but if a move still fails partway the plugin reports the failing command and does not roll back.
 - The tab picker excludes the source workspace; the pane picker excludes the source tab.
-- `ctrl-t` in the pane picker is one-way; press `esc` and reopen to go back to the current workspace's tabs.
 
 ## Development
 

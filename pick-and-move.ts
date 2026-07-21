@@ -262,6 +262,19 @@ function livePaneTabs(): Map<string, string> {
 const FZF_NO_MATCH = 1;
 const FZF_CANCELLED = 130;
 
+// Herdr themes the popup's ANSI palette, so styling with palette names (never
+// hex) makes the picker inherit whatever theme is active. Blue is herdr's
+// accent; 8 is the muted "comment" tone its chrome uses for secondary text.
+const FZF_STYLE = [
+  "--layout", "reverse",
+  "--info", "inline-right",
+  "--no-scrollbar",
+  "--pointer", "▌",
+  "--highlight-line",
+  "--padding", "1,2",
+  "--color", "16,bg:-1,gutter:-1,bg+:0,fg:7,fg+:15,hl:4,hl+:12,prompt:4,pointer:4,input-fg:15,info:8,header:8,separator:8,spinner:8",
+];
+
 interface FzfPick {
   outcome: "picked" | "cancelled" | "failed";
   stdout: string;
@@ -301,11 +314,11 @@ function moveTabFlow(srcPane: string): number {
 
   const fzf = runFzf(
     [
+      ...FZF_STYLE,
       "--prompt", "move tab to › ",
-      "--header", "type to filter · enter moves · esc cancels",
+      "--header", "enter moves · esc cancels",
       "--delimiter", "\t",
       "--with-nth", "1",
-      "--height", "100%",
     ],
     lines
   );
@@ -376,20 +389,30 @@ function movePaneFlow(srcPane: string): number {
   const currentLines = paneDestLines(tabs, workspaces, src.tab_id, src.workspace_id, false);
   const allLines = paneDestLines(tabs, workspaces, src.tab_id, src.workspace_id, true);
 
-  // ctrl-t reloads the full cross-workspace list from a pre-written file
-  // (fzf's reload runs a command, so piped stdin alone can't feed it).
-  const allPath = path.join(os.tmpdir(), `drovr-tabs-${process.pid}.txt`);
+  // ctrl-t toggles between the scoped and cross-workspace lists. fzf's reload
+  // runs a command (piped stdin alone can't feed it), so both lists are
+  // pre-written to files and a marker file carries the toggle state.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drovr-"));
+  const scopedPath = path.join(dir, "scoped.txt");
+  const allPath = path.join(dir, "all.txt");
+  const allOn = path.join(dir, "all-on");
+  fs.writeFileSync(scopedPath, currentLines.join("\n"));
   fs.writeFileSync(allPath, allLines.join("\n"));
+  const toggle =
+    `if [ -e '${allOn}' ]; then rm '${allOn}'; ` +
+    `echo "reload(cat '${scopedPath}')+change-prompt(move pane to › )"; ` +
+    `else touch '${allOn}'; ` +
+    `echo "reload(cat '${allPath}')+change-prompt(move pane anywhere › )"; fi`;
   try {
     const fzf = runFzf(
       [
+        ...FZF_STYLE,
         "--prompt", "move pane to › ",
-        "--header", "enter splits right · alt-d splits down · ctrl-t all workspaces · esc cancels",
+        "--header", "enter splits right · alt-d splits down · ctrl-t toggles all workspaces · esc cancels",
         "--delimiter", "\t",
         "--with-nth", "1",
-        "--height", "100%",
         "--expect", "alt-d",
-        "--bind", `ctrl-t:reload(cat '${allPath}')+change-prompt(move pane anywhere › )`,
+        "--bind", `ctrl-t:transform:${toggle}`,
       ],
       currentLines.join("\n")
     );
@@ -422,9 +445,7 @@ function movePaneFlow(srcPane: string): number {
     focusDestination(moved);
     return 0;
   } finally {
-    try {
-      fs.unlinkSync(allPath);
-    } catch {}
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 

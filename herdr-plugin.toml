@@ -1,6 +1,6 @@
 id = "drovr"
 name = "Drovr"
-version = "0.2.0"
+version = "0.3.0"
 min_herdr_version = "0.7.4"
 description = "Drive your herd: move the focused tab or pane, live agents included, anywhere with an fzf picker."
 platforms = ["linux", "macos"]
@@ -18,8 +18,11 @@ title = "Move pane to tab…"
 contexts = ["pane"]
 command = ["node", "open-picker.ts", "pane"]
 
+# Defaults only; open-picker.ts sizes each open to fit its list.
 [[panes]]
 id = "picker"
 title = "Drovr"
 placement = "popup"
+width = 64
+height = 18
 command = ["node", "pick-and-move.ts"]
