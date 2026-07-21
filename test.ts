@@ -7,6 +7,7 @@ import {
   leavesOf,
   paneDestLines,
   parsePaneChoice,
+  searchScript,
   NEW_TAB_TOKEN,
   NEW_WS_TOKEN,
 } from "./pick-and-move.ts";
@@ -106,16 +107,12 @@ const workspaces: WorkspaceEntry[] = [
 
 test("pane destinations exclude the source tab and stay within the source workspace by default", () => {
   assert.deepStrictEqual(paneDestLines(tabs, workspaces, "w1:t1", "w1", false), [
-    `＋ new tab\t${NEW_TAB_TOKEN}`,
-    `＋ new workspace\t${NEW_WS_TOKEN}`,
     "logs\ttab:w1:t2",
   ]);
 });
 
 test("the all-workspaces view lists source-workspace tabs first and prefixes foreign tabs with their workspace label", () => {
   assert.deepStrictEqual(paneDestLines(tabs, workspaces, "w1:t1", "w1", true), [
-    `＋ new tab\t${NEW_TAB_TOKEN}`,
-    `＋ new workspace\t${NEW_WS_TOKEN}`,
     "logs\ttab:w1:t2",
     "backend / api\ttab:w2:t1",
     "backend / w2:t2\ttab:w2:t2",
@@ -147,4 +144,49 @@ test("sentinel rows parse to new-tab and new-workspace destinations", () => {
 test("lines without a token or with an unknown token parse to null", () => {
   assert.strictEqual(parsePaneChoice("", "no token here"), null);
   assert.strictEqual(parsePaneChoice("", "label\tgarbage"), null);
+});
+
+// The search script is real shell run under fzf's reload; exercise it as such.
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+function runSearch(query: string): string[] {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drovr-test-"));
+  try {
+    const candidates = path.join(dir, "tabs.txt");
+    fs.writeFileSync(candidates, "logs\ttab:w1:t2\napi\ttab:w2:t1");
+    const sh = path.join(dir, "search.sh");
+    fs.writeFileSync(sh, searchScript(`'${candidates}'`, [["＋ new tab", NEW_TAB_TOKEN], ["＋ new workspace", NEW_WS_TOKEN]]));
+    const r = spawnSync("sh", [sh, query], { encoding: "utf8" });
+    assert.strictEqual(r.status, 0, r.stderr);
+    return r.stdout.split("\n").filter(Boolean);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("an empty query lists every candidate, then the sentinels", () => {
+  assert.deepStrictEqual(runSearch(""), [
+    "logs\ttab:w1:t2",
+    "api\ttab:w2:t1",
+    `＋ new tab\t${NEW_TAB_TOKEN}`,
+    `＋ new workspace\t${NEW_WS_TOKEN}`,
+  ]);
+});
+
+test("a query puts matches first and stamps it on the sentinels", () => {
+  assert.deepStrictEqual(runSearch("log"), [
+    "logs\ttab:w1:t2",
+    `＋ new tab “log”\t${NEW_TAB_TOKEN}`,
+    `＋ new workspace “log”\t${NEW_WS_TOKEN}`,
+  ]);
+});
+
+test("a query matching nothing still offers the named sentinels", () => {
+  assert.deepStrictEqual(runSearch("my new thing"), [
+    `＋ new tab “my new thing”\t${NEW_TAB_TOKEN}`,
+    `＋ new workspace “my new thing”\t${NEW_WS_TOKEN}`,
+  ]);
 });

@@ -60,7 +60,7 @@ That's it.
 
 1. Focus the tab you want to move
 2. Press `prefix+M`
-3. Pick a destination workspace, or choose `＋ new workspace`
+3. Pick a destination workspace, or choose `＋ new workspace` (a typed query becomes its name)
 
 ### Move a pane
 
@@ -75,6 +75,8 @@ Pane picker keys:
 - `alt-d` - move, splitting **down** instead
 - `ctrl-t` - toggle between the current workspace's tabs and every workspace's
 - `esc` - cancel
+
+Picking a `＋ new tab` / `＋ new workspace` row with a query typed uses the query as the new tab or workspace name - the row previews it live (`＋ new tab "api"`). The `＋` rows survive any query, sitting below real matches so `enter` still lands on the best match.
 
 The picker is keyboard-driven (fzf semantics): a single mouse click only highlights a row. If the source tab or workspace becomes empty after a move, Herdr closes it.
 

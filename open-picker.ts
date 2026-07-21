@@ -26,7 +26,11 @@ function herdrJSON<T>(args: string[]): { result: T } {
 // this run can show (ctrl-t widens the pane list, and popups don't resize
 // once open). Any listing failure falls back to the manifest defaults.
 const WIDTH = 64;
-const CHROME = 7; // popup border + fzf padding + prompt + separator + header
+// Popup border + fzf padding + prompt + separator, plus the footer hints
+// (4 lines in pane mode, 2 in tab mode).
+function chrome(mode: string): number {
+  return 6 + (mode === "pane" ? 4 : 2);
+}
 
 function listRows(mode: string): number {
   if (mode === "pane") {
@@ -52,7 +56,7 @@ try {
 
   const sizeArgs: string[] = [];
   try {
-    const height = Math.min(Math.max(listRows(mode) + CHROME, 11), 26);
+    const height = Math.min(Math.max(listRows(mode) + chrome(mode), 13), 28);
     sizeArgs.push("--width", String(WIDTH), "--height", String(height));
   } catch {}
 

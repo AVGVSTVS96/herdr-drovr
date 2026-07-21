@@ -190,9 +190,10 @@ function leavesOf(node: LayoutNode, out: string[] = []): string[] {
 export const NEW_TAB_TOKEN = "new-tab";
 export const NEW_WS_TOKEN = "new-ws";
 
-// Candidate lines for the pane picker: sentinels first, then destination tabs
-// (source tab excluded, source-workspace tabs first). Column 2 carries the
-// machine token; fzf hides it via --with-nth=1.
+// Candidate lines for the pane picker: destination tabs only (source tab
+// excluded, source-workspace tabs first); the ＋ sentinels are appended by
+// the callers. Column 2 carries the machine token; fzf hides it via
+// --with-nth=1.
 function paneDestLines(
   tabs: TabEntry[],
   workspaces: WorkspaceEntry[],
@@ -206,12 +207,11 @@ function paneDestLines(
     ...eligible.filter((t) => t.workspace_id === srcWsId),
     ...eligible.filter((t) => t.workspace_id !== srcWsId),
   ];
-  const rows = ordered.map((t) => {
+  return ordered.map((t) => {
     const name = t.label || t.tab_id;
     const shown = t.workspace_id === srcWsId ? name : `${wsLabel.get(t.workspace_id) || t.workspace_id} / ${name}`;
     return `${shown}\ttab:${t.tab_id}`;
   });
-  return [`＋ new tab\t${NEW_TAB_TOKEN}`, `＋ new workspace\t${NEW_WS_TOKEN}`, ...rows];
 }
 
 // fzf ran with --expect=alt-d: enter keeps the default right split, alt-d
@@ -272,8 +272,37 @@ const FZF_STYLE = [
   "--pointer", "▌",
   "--highlight-line",
   "--padding", "1,2",
-  "--color", "16,bg:-1,gutter:-1,bg+:0,fg:7,fg+:15,hl:4,hl+:12,prompt:4,pointer:4,input-fg:15,info:8,header:8,separator:8,spinner:8",
+  "--footer-border", "none",
+  "--color", "16,bg:-1,gutter:-1,bg+:0,fg:7,fg+:15,hl:4,hl+:12,prompt:4,pointer:4,input-fg:15,info:8,footer:8,separator:8,spinner:8",
 ];
+
+// Key hints, one per line, right-aligned along the popup's bottom edge.
+// The footer's usable width is columns minus 7: 4 for --padding 1,2 plus 3
+// that fzf reserves around footer lines (measured; stdout is the popup TTY).
+function footer(lines: string[]): string {
+  const w = (process.stdout.columns ?? 62) - 7;
+  return lines.map((l) => l.padStart(w)).join("\n");
+}
+
+// fzf runs with --disabled and this script does the filtering (via fzf
+// --filter on reload): the ＋ sentinel rows close the list under any query,
+// echo the typed name so "＋ new tab “api”" reads as what enter will create,
+// and enter always lands on the best real match.
+function searchScript(candidatesExpr: string, sentinels: [string, string][]): string {
+  const named = sentinels.map(([label, token]) => `printf '${label} “%s”\\t${token}\\n' "$q"`).join("\n  ");
+  const plain = sentinels.map(([label, token]) => `printf '${label}\\t${token}\\n'`).join("\n  ");
+  return `q=$1
+f=${candidatesExpr}
+if [ -n "$q" ]; then
+  fzf --filter "$q" < "$f"
+  ${named}
+else
+  awk 1 "$f"
+  ${plain}
+fi
+exit 0
+`;
+}
 
 interface FzfPick {
   outcome: "picked" | "cancelled" | "failed";
@@ -306,26 +335,43 @@ function moveTabFlow(srcPane: string): number {
   const destinations = herdrJSON<WorkspaceListResult>(["workspace", "list"]).result.workspaces.filter(
     (w) => w.workspace_id !== srcWs
   );
-  const NEW_LABEL = "＋ new workspace";
-  const lines = [
-    NEW_LABEL,
-    ...destinations.map((w) => `${w.label || w.workspace_id}\t${w.workspace_id}`),
-  ].join("\n");
+  const wsRows = destinations.map((w) => `${w.label || w.workspace_id}\t${w.workspace_id}`);
 
-  const fzf = runFzf(
-    [
-      ...FZF_STYLE,
-      "--prompt", "move tab to › ",
-      "--header", "enter moves · esc cancels",
-      "--delimiter", "\t",
-      "--with-nth", "1",
-    ],
-    lines
-  );
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drovr-"));
+  const wsPath = path.join(dir, "workspaces.txt");
+  const searchSh = path.join(dir, "search.sh");
+  fs.writeFileSync(wsPath, wsRows.join("\n"));
+  fs.writeFileSync(searchSh, searchScript(`'${wsPath}'`, [["＋ new workspace", NEW_WS_TOKEN]]));
+
+  let fzf: FzfPick;
+  try {
+    fzf = runFzf(
+      [
+        ...FZF_STYLE,
+        "--prompt", "move tab to › ",
+        "--footer", footer(["enter moves", "esc cancels"]),
+        "--delimiter", "\t",
+        "--with-nth", "1",
+        "--print-query",
+        "--disabled",
+        "--bind", `change:reload(sh '${searchSh}' {q})`,
+      ],
+      [...wsRows, `＋ new workspace\t${NEW_WS_TOKEN}`].join("\n")
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
   if (fzf.outcome === "cancelled") return 0;
   if (fzf.outcome === "failed") return 1;
-  const choice = fzf.stdout.trim();
-  if (!choice) return 0;
+
+  // With --print-query, line 1 is the typed query, line 2 the pick.
+  const [queryRaw = "", picked = ""] = fzf.stdout.split("\n");
+  if (!picked.trim()) return 0;
+  const token = picked.split("\t")[1];
+  if (!token) {
+    keepPickerOpenUntilEnter(`drovr: could not parse the picked workspace: ${JSON.stringify(picked)}`);
+    return 1;
+  }
 
   // The popup is session-modal, so the user can't touch the layout while it
   // is open, but sibling agents driving the CLI still can; re-validate.
@@ -335,17 +381,12 @@ function moveTabFlow(srcPane: string): number {
     return 1;
   }
 
-  const destWs = choice === NEW_LABEL ? null : choice.split("\t")[1];
-  if (choice !== NEW_LABEL && !destWs) {
-    keepPickerOpenUntilEnter(`drovr: could not parse the picked workspace: ${JSON.stringify(choice)}`);
-    return 1;
-  }
-
   const rootAnchor = anchorOf(root);
+  // A typed query names the new workspace; the tab keeps its own label.
   const first = move(
-    destWs
-      ? ["pane", "move", rootAnchor, "--new-tab", "--workspace", destWs, "--label", tabLabel, "--no-focus"]
-      : ["pane", "move", rootAnchor, "--new-workspace", "--label", tabLabel, "--tab-label", tabLabel, "--no-focus"]
+    token === NEW_WS_TOKEN
+      ? ["pane", "move", rootAnchor, "--new-workspace", "--label", queryRaw.trim() || tabLabel, "--tab-label", tabLabel, "--no-focus"]
+      : ["pane", "move", rootAnchor, "--new-tab", "--workspace", token, "--label", tabLabel, "--no-focus"]
   );
   const newTab = first.tab_id;
   const idMap: Record<string, string> = { [rootAnchor]: first.pane_id };
@@ -389,64 +430,79 @@ function movePaneFlow(srcPane: string): number {
   const currentLines = paneDestLines(tabs, workspaces, src.tab_id, src.workspace_id, false);
   const allLines = paneDestLines(tabs, workspaces, src.tab_id, src.workspace_id, true);
 
-  // ctrl-t toggles between the scoped and cross-workspace lists. fzf's reload
-  // runs a command (piped stdin alone can't feed it), so both lists are
-  // pre-written to files and a marker file carries the toggle state.
+  // ctrl-t toggles between the scoped and cross-workspace lists: a marker
+  // file carries the state, the search script picks the file per reload. The
+  // candidate files hold only real tabs; the script owns the sentinels.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drovr-"));
   const scopedPath = path.join(dir, "scoped.txt");
   const allPath = path.join(dir, "all.txt");
   const allOn = path.join(dir, "all-on");
+  const searchSh = path.join(dir, "search.sh");
   fs.writeFileSync(scopedPath, currentLines.join("\n"));
   fs.writeFileSync(allPath, allLines.join("\n"));
+  fs.writeFileSync(
+    searchSh,
+    searchScript(`$(if test -e '${allOn}'; then echo '${allPath}'; else echo '${scopedPath}'; fi)`, [
+      ["＋ new tab", NEW_TAB_TOKEN],
+      ["＋ new workspace", NEW_WS_TOKEN],
+    ])
+  );
+  // transform[] (bracket delimiter: the body nests parens) flips the marker
+  // and prompt; the chained reload then re-filters against the new scope.
   const toggle =
-    `if [ -e '${allOn}' ]; then rm '${allOn}'; ` +
-    `echo "reload(cat '${scopedPath}')+change-prompt(move pane to › )"; ` +
-    `else touch '${allOn}'; ` +
-    `echo "reload(cat '${allPath}')+change-prompt(move pane anywhere › )"; fi`;
+    `if test -e '${allOn}'; then rm '${allOn}'; echo 'change-prompt(move pane to › )'; ` +
+    `else touch '${allOn}'; echo 'change-prompt(move pane anywhere › )'; fi`;
+  let fzf: FzfPick;
   try {
-    const fzf = runFzf(
+    fzf = runFzf(
       [
         ...FZF_STYLE,
         "--prompt", "move pane to › ",
-        "--header", "enter splits right · alt-d splits down · ctrl-t toggles all workspaces · esc cancels",
+        "--footer", footer(["enter splits right", "alt-d splits down", "ctrl-t all workspaces", "esc cancels"]),
         "--delimiter", "\t",
         "--with-nth", "1",
+        "--print-query",
+        "--disabled",
         "--expect", "alt-d",
-        "--bind", `ctrl-t:transform:${toggle}`,
+        "--bind", `change:reload(sh '${searchSh}' {q})`,
+        "--bind", `ctrl-t:transform[${toggle}]+reload(sh '${searchSh}' {q})`,
       ],
-      currentLines.join("\n")
+      [...currentLines, `＋ new tab\t${NEW_TAB_TOKEN}`, `＋ new workspace\t${NEW_WS_TOKEN}`].join("\n")
     );
-    if (fzf.outcome === "cancelled") return 0;
-    if (fzf.outcome === "failed") return 1;
-
-    // With --expect, line 1 is the confirming key ("" for enter), line 2 the pick.
-    const [expectKey = "", picked = ""] = fzf.stdout.split("\n");
-    if (!picked.trim()) return 0;
-    const choice = parsePaneChoice(expectKey.trim(), picked);
-    if (!choice) {
-      keepPickerOpenUntilEnter(`drovr: could not parse the picked destination: ${JSON.stringify(picked)}`);
-      return 1;
-    }
-
-    if (livePaneTabs().get(src.pane_id) !== src.tab_id) {
-      keepPickerOpenUntilEnter("drovr: the source pane changed while the picker was open; nothing was moved.");
-      return 1;
-    }
-
-    // Omitting --target-pane splits the destination tab's focused pane, which
-    // is the intuitive landing spot.
-    const moved = move(
-      choice.dest.kind === "tab"
-        ? ["pane", "move", src.pane_id, "--tab", choice.dest.tabId, "--split", choice.direction, "--no-focus"]
-        : choice.dest.kind === "new-tab"
-          ? ["pane", "move", src.pane_id, "--new-tab", "--workspace", src.workspace_id, "--no-focus"]
-          : ["pane", "move", src.pane_id, "--new-workspace", "--no-focus"]
-    );
-    focusDestination(moved);
-    return 0;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  if (fzf.outcome === "cancelled") return 0;
+  if (fzf.outcome === "failed") return 1;
+
+  // With --print-query and --expect: line 1 is the typed query, line 2 the
+  // confirming key ("" for enter), line 3 the pick.
+  const [queryRaw = "", expectKey = "", picked = ""] = fzf.stdout.split("\n");
+  if (!picked.trim()) return 0;
+  const choice = parsePaneChoice(expectKey.trim(), picked);
+  if (!choice) {
+    keepPickerOpenUntilEnter(`drovr: could not parse the picked destination: ${JSON.stringify(picked)}`);
+    return 1;
+  }
+
+  if (livePaneTabs().get(src.pane_id) !== src.tab_id) {
+    keepPickerOpenUntilEnter("drovr: the source pane changed while the picker was open; nothing was moved.");
+    return 1;
+  }
+
+  // Omitting --target-pane splits the destination tab's focused pane, which
+  // is the intuitive landing spot. A typed query names a new tab/workspace.
+  const name = queryRaw.trim();
+  const label = name ? ["--label", name] : [];
+  const moved = move(
+    choice.dest.kind === "tab"
+      ? ["pane", "move", src.pane_id, "--tab", choice.dest.tabId, "--split", choice.direction, "--no-focus"]
+      : choice.dest.kind === "new-tab"
+        ? ["pane", "move", src.pane_id, "--new-tab", "--workspace", src.workspace_id, ...label, "--no-focus"]
+        : ["pane", "move", src.pane_id, "--new-workspace", ...label, "--no-focus"]
+  );
+  focusDestination(moved);
+  return 0;
 }
 
 function main(): number {
@@ -459,7 +515,7 @@ function main(): number {
   return mode === "pane" ? movePaneFlow(pane) : moveTabFlow(pane);
 }
 
-export { rootFromFlatSnapshot, secondChildRect, anchorOf, leavesOf, paneDestLines, parsePaneChoice };
+export { rootFromFlatSnapshot, secondChildRect, anchorOf, leavesOf, paneDestLines, parsePaneChoice, searchScript };
 
 if (process.argv[1] === import.meta.filename) {
   try {
