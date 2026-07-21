@@ -265,23 +265,40 @@ const FZF_CANCELLED = 130;
 // Herdr themes the popup's ANSI palette, so styling with palette names (never
 // hex) makes the picker inherit whatever theme is active. Blue is herdr's
 // accent; 8 is the muted "comment" tone its chrome uses for secondary text.
+//
+// Geometry (measured in a pty; every element must share one right boundary):
+// fzf reserves the last content column on the input/info row, so the rule and
+// count stop one column short of the content edge. --scrollbar reserves that
+// same column in the list, pulling the highlight bar back to the rule's edge;
+// it stays load-bearing even when nothing scrolls. Padding is 2 left / 0
+// right: the scrollbar slot plus the column herdr's popup insets on the right
+// add back 2, so both gaps render even. gutter:8 mutes the per-line ▌ bar;
+// the pointer stays accent blue.
 const FZF_STYLE = [
   "--layout", "reverse",
   "--info", "inline-right",
-  "--no-scrollbar",
+  "--scrollbar",
   "--pointer", "▌",
   "--highlight-line",
-  "--padding", "1,2",
+  "--ansi",
+  "--padding", "1,0,1,2",
   "--footer-border", "none",
-  "--color", "16,bg:-1,gutter:-1,bg+:0,fg:7,fg+:15,hl:4,hl+:12,prompt:4,pointer:4,input-fg:15,info:8,footer:8,separator:8,spinner:8",
+  "--color", "16,bg:-1,gutter:8,bg+:0,fg:7,fg+:15,hl:4,hl+:12,prompt:4,pointer:4,input-fg:15,info:8,footer:8,separator:8,spinner:8,scrollbar:8",
 ];
 
-// Key hints, one per line, right-aligned along the popup's bottom edge.
-// The footer's usable width is columns minus 7: 4 for --padding 1,2 plus 3
-// that fzf reserves around footer lines (measured; stdout is the popup TTY).
+// Key hints, one per line, right-aligned to the same boundary as the rule and
+// highlight bar: columns minus 5 (2 left padding + 3 fzf reserves around
+// footer lines; measured, stdout is the popup TTY).
 function footer(lines: string[]): string {
-  const w = (process.stdout.columns ?? 62) - 7;
+  const w = (process.stdout.columns ?? 62) - 5;
   return lines.map((l) => l.padStart(w)).join("\n");
+}
+
+// The ＋ sentinel rows render in the muted tone (fzf runs with --ansi).
+const MUTE = "\x1b[38;5;8m";
+const UNMUTE = "\x1b[0m";
+function mutedRow(label: string, token: string): string {
+  return `${MUTE}${label}${UNMUTE}\t${token}`;
 }
 
 // fzf runs with --disabled and this script does the filtering (via fzf
@@ -289,8 +306,12 @@ function footer(lines: string[]): string {
 // echo the typed name so "＋ new tab “api”" reads as what enter will create,
 // and enter always lands on the best real match.
 function searchScript(candidatesExpr: string, sentinels: [string, string][]): string {
-  const named = sentinels.map(([label, token]) => `printf '${label} “%s”\\t${token}\\n' "$q"`).join("\n  ");
-  const plain = sentinels.map(([label, token]) => `printf '${label}\\t${token}\\n'`).join("\n  ");
+  const named = sentinels
+    .map(([label, token]) => `printf '\\033[38;5;8m${label} “%s”\\033[0m\\t${token}\\n' "$q"`)
+    .join("\n  ");
+  const plain = sentinels
+    .map(([label, token]) => `printf '\\033[38;5;8m${label}\\033[0m\\t${token}\\n'`)
+    .join("\n  ");
   return `q=$1
 f=${candidatesExpr}
 if [ -n "$q" ]; then
@@ -356,7 +377,7 @@ function moveTabFlow(srcPane: string): number {
         "--disabled",
         "--bind", `change:reload(sh '${searchSh}' {q})`,
       ],
-      [...wsRows, `＋ new workspace\t${NEW_WS_TOKEN}`].join("\n")
+      [...wsRows, mutedRow("＋ new workspace", NEW_WS_TOKEN)].join("\n")
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -467,7 +488,7 @@ function movePaneFlow(srcPane: string): number {
         "--bind", `change:reload(sh '${searchSh}' {q})`,
         "--bind", `ctrl-t:transform[${toggle}]+reload(sh '${searchSh}' {q})`,
       ],
-      [...currentLines, `＋ new tab\t${NEW_TAB_TOKEN}`, `＋ new workspace\t${NEW_WS_TOKEN}`].join("\n")
+      [...currentLines, mutedRow("＋ new tab", NEW_TAB_TOKEN), mutedRow("＋ new workspace", NEW_WS_TOKEN)].join("\n")
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

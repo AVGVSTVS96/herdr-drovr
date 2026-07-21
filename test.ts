@@ -167,26 +167,29 @@ function runSearch(query: string): string[] {
   }
 }
 
-test("an empty query lists every candidate, then the sentinels", () => {
+const MUTE = "\x1b[38;5;8m";
+const UNMUTE = "\x1b[0m";
+
+test("an empty query lists every candidate, then the muted sentinels", () => {
   assert.deepStrictEqual(runSearch(""), [
     "logs\ttab:w1:t2",
     "api\ttab:w2:t1",
-    `＋ new tab\t${NEW_TAB_TOKEN}`,
-    `＋ new workspace\t${NEW_WS_TOKEN}`,
+    `${MUTE}＋ new tab${UNMUTE}\t${NEW_TAB_TOKEN}`,
+    `${MUTE}＋ new workspace${UNMUTE}\t${NEW_WS_TOKEN}`,
   ]);
 });
 
 test("a query puts matches first and stamps it on the sentinels", () => {
   assert.deepStrictEqual(runSearch("log"), [
     "logs\ttab:w1:t2",
-    `＋ new tab “log”\t${NEW_TAB_TOKEN}`,
-    `＋ new workspace “log”\t${NEW_WS_TOKEN}`,
+    `${MUTE}＋ new tab “log”${UNMUTE}\t${NEW_TAB_TOKEN}`,
+    `${MUTE}＋ new workspace “log”${UNMUTE}\t${NEW_WS_TOKEN}`,
   ]);
 });
 
 test("a query matching nothing still offers the named sentinels", () => {
   assert.deepStrictEqual(runSearch("my new thing"), [
-    `＋ new tab “my new thing”\t${NEW_TAB_TOKEN}`,
-    `＋ new workspace “my new thing”\t${NEW_WS_TOKEN}`,
+    `${MUTE}＋ new tab “my new thing”${UNMUTE}\t${NEW_TAB_TOKEN}`,
+    `${MUTE}＋ new workspace “my new thing”${UNMUTE}\t${NEW_WS_TOKEN}`,
   ]);
 });
