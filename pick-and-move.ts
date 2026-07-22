@@ -286,16 +286,32 @@ const FZF_STYLE = [
   "--highlight-line",
   "--ansi",
   "--padding", "1,1,1,3",
-  "--footer-border", "none",
-  "--color", "16,bg:-1,gutter:8,bg+:0,fg:7,fg+:15,hl:4,hl+:12,prompt:4,pointer:4,input-fg:15,info:8,footer:8,separator:8,spinner:8,scrollbar:8",
+  "--color", "16,bg:-1,gutter:8,bg+:0,fg:7,fg+:15,hl:4,hl+:12,prompt:4,pointer:4,input-fg:15,info:8,separator:8,spinner:8,scrollbar:8",
 ];
 
-// Key hints, one per line, right-aligned to the same boundary as the rule and
-// highlight bar: columns minus 7 (4 horizontal padding + 3 fzf reserves around
-// footer lines; measured, stdout is the popup TTY).
-function footer(lines: string[]): string {
-  const w = (process.stdout.columns ?? 62) - 7;
-  return lines.map((l) => l.padStart(w)).join("\n");
+// Preview avoids fzf's built-in 2-column footer/header indent.
+// Usable width: TTY columns - 4 padding columns - 1 reserved right column.
+type Hint = [key: string, action: string];
+const KEY_TONE = "\x1b[38;5;7m";
+function hintArgs(dir: string, left: Hint[], right: Hint[]): string[] {
+  const w = (process.stdout.columns ?? 62) - 5;
+  const lKeyW = Math.max(...left.map(([k]) => k.length));
+  const rKeyW = Math.max(...right.map(([k]) => k.length));
+  const rActW = Math.max(...right.map(([, a]) => a.length));
+  const rows = Math.max(left.length, right.length);
+  const lines: string[] = [];
+  for (let i = 0; i < rows; i++) {
+    const [lk, la] = left[i] ?? ["", ""];
+    const [rk, ra] = right[i] ?? ["", ""];
+    const lText = lk ? `${KEY_TONE}${lk.padEnd(lKeyW)}${UNMUTE}  ${MUTE}${la}${UNMUTE}` : "";
+    const rText = rk ? `${KEY_TONE}${rk.padStart(rKeyW)}${UNMUTE}  ${MUTE}${ra.padStart(rActW)}${UNMUTE}` : "";
+    const lLen = lk ? lKeyW + 2 + la.length : 0;
+    const rLen = rk ? rKeyW + 2 + rActW : 0;
+    lines.push(`${lText}${" ".repeat(Math.max(1, w - lLen - rLen))}${rText}`);
+  }
+  const file = path.join(dir, "hints.txt");
+  fs.writeFileSync(file, "\n" + lines.join("\n"));
+  return ["--preview", `cat '${file}'`, "--preview-window", `down,${rows + 1},noborder,nowrap,noinfo`];
 }
 
 // The ＋ sentinel rows render in the muted tone (fzf runs with --ansi).
@@ -380,7 +396,7 @@ function moveTabFlow(srcPane: string): number {
       [
         ...FZF_STYLE,
         "--prompt", "move tab to › ",
-        "--footer", footer(["enter moves", "esc cancels"]),
+        ...hintArgs(dir, [["enter", "move"]], [["esc", "cancel"]]),
         "--delimiter", "\t",
         "--with-nth", "1",
         "--print-query",
@@ -489,7 +505,11 @@ function movePaneFlow(srcPane: string): number {
       [
         ...FZF_STYLE,
         "--prompt", "move pane to › ",
-        "--footer", footer(["enter splits right", "alt-d splits down", "ctrl-t all workspaces", "esc cancels"]),
+        ...hintArgs(
+          dir,
+          [["enter", "split right"], ["alt-d", "split down"]],
+          [["esc", "cancel"], ["ctrl-t", "all spaces"]]
+        ),
         "--delimiter", "\t",
         "--with-nth", "1",
         "--print-query",

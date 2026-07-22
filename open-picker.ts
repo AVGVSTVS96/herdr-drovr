@@ -26,7 +26,7 @@ function herdrJSON<T>(args: string[]): { result: T } {
 // this run can show (ctrl-t widens the pane list, and popups don't resize
 // once open). Any listing failure falls back to the manifest defaults.
 const WIDTH = 64;
-// Popup border + fzf padding + prompt + separator, plus the footer hints
+// Popup border + fzf padding + prompt + separator, plus the key hints
 // (4 lines in pane mode, 2 in tab mode).
 function chrome(mode: string): number {
   return 6 + (mode === "pane" ? 4 : 2);
