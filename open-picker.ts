@@ -66,6 +66,10 @@ try {
       "plugin", "pane", "open",
       "--plugin", pluginId,
       "--entrypoint", "picker",
+      // The popup entrypoint's command is plugin-root-relative, and a popup
+      // does not inherit this process's directory: on Windows it lands in the
+      // server's cwd (C:\Windows) and node can't resolve the picker at all.
+      "--cwd", import.meta.dirname.replace(/^\\\\\?\\/, ""),
       ...sizeArgs,
       "--env", `DROVR_MODE=${mode}`,
       "--env", `DROVR_PANE=${pane}`,

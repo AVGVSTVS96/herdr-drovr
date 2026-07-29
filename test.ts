@@ -7,7 +7,6 @@ import {
   leavesOf,
   paneDestLines,
   parsePaneChoice,
-  searchScript,
   NEW_TAB_TOKEN,
   NEW_WS_TOKEN,
 } from "./pick-and-move.ts";
@@ -146,25 +145,54 @@ test("lines without a token or with an unknown token parse to null", () => {
   assert.strictEqual(parsePaneChoice("", "label\tgarbage"), null);
 });
 
-// The search script is real shell run under fzf's reload; exercise it as such.
+// --search and --toggle are this file re-entered by fzf's reload and
+// transform; exercise them as the subprocesses they are.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-function runSearch(query: string): string[] {
+const PICKER = path.join(import.meta.dirname, "pick-and-move.ts");
+
+function withSpec<T>(body: (dir: string, spec: string) => T): T {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drovr-test-"));
   try {
     const candidates = path.join(dir, "tabs.txt");
     fs.writeFileSync(candidates, "logs\ttab:w1:t2\napi\ttab:w2:t1");
-    const sh = path.join(dir, "search.sh");
-    fs.writeFileSync(sh, searchScript(`'${candidates}'`, [["＋ new tab", NEW_TAB_TOKEN], ["＋ new workspace", NEW_WS_TOKEN]]));
-    const r = spawnSync("sh", [sh, query], { encoding: "utf8" });
-    assert.strictEqual(r.status, 0, r.stderr);
-    return r.stdout.split("\n").filter(Boolean);
+    const all = path.join(dir, "all.txt");
+    fs.writeFileSync(all, "ui\ttab:w3:t9");
+    const spec = path.join(dir, "search.json");
+    fs.writeFileSync(
+      spec,
+      JSON.stringify({
+        candidates,
+        sentinels: [
+          ["＋ new tab", NEW_TAB_TOKEN],
+          ["＋ new workspace", NEW_WS_TOKEN],
+        ],
+        alt: {
+          candidates: all,
+          marker: path.join(dir, "all-on"),
+          prompt: "move pane to › ",
+          altPrompt: "move pane anywhere › ",
+        },
+      })
+    );
+    return body(dir, spec);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function picker(spec: string, subcommand: string, query?: string): string {
+  const args = [PICKER, subcommand, spec, ...(query === undefined ? [] : [query])];
+  const r = spawnSync(process.execPath, args, { encoding: "utf8" });
+  assert.strictEqual(r.status, 0, r.stderr);
+  return r.stdout;
+}
+
+function runSearch(query: string): string[] {
+  return withSpec((_dir, spec) => picker(spec, "--search", query).split("\n").filter(Boolean));
 }
 
 const MUTE = "\x1b[38;5;8m";
@@ -192,4 +220,20 @@ test("a query matching nothing still offers the named sentinels", () => {
     `${MUTE}＋ new tab “my new thing”${UNMUTE}\t${NEW_TAB_TOKEN}`,
     `${MUTE}＋ new workspace “my new thing”${UNMUTE}\t${NEW_WS_TOKEN}`,
   ]);
+});
+
+test("the scope toggle flips the prompt and the candidates the next search reads", () => {
+  withSpec((_dir, spec) => {
+    const rows = (): string[] => picker(spec, "--search", "").split("\n").filter(Boolean);
+
+    assert.strictEqual(picker(spec, "--toggle"), "change-prompt(move pane anywhere › )");
+    assert.deepStrictEqual(rows(), [
+      "ui\ttab:w3:t9",
+      `${MUTE}＋ new tab${UNMUTE}\t${NEW_TAB_TOKEN}`,
+      `${MUTE}＋ new workspace${UNMUTE}\t${NEW_WS_TOKEN}`,
+    ]);
+
+    assert.strictEqual(picker(spec, "--toggle"), "change-prompt(move pane to › )");
+    assert.strictEqual(rows()[0], "logs\ttab:w1:t2");
+  });
 });

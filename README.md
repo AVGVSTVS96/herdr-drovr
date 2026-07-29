@@ -22,7 +22,9 @@ Herdr has no built-in "move tab to workspace". Recreating a tab by reapplying it
 
 - Herdr `>= 0.7.4` (the picker is a floating popup panel, introduced in 0.7.4)
 - `node >= 23` on `PATH` (the plugin is written in TypeScript and relies on Node's native type stripping to run the `.ts` files directly; there is no build step)
-- `fzf` on `PATH` (`brew install fzf` on macOS)
+- `fzf` on `PATH` (`brew install fzf` on macOS, `winget install junegunn.fzf` on Windows)
+
+Linux, macOS, and Windows. `fzf` and `node` are the whole runtime: the per-keystroke search re-invokes node rather than a generated shell script, so no `sh` or coreutils are needed.
 
 ## Installation
 
@@ -30,7 +32,7 @@ Herdr has no built-in "move tab to workspace". Recreating a tab by reapplying it
 herdr plugin install AVGVSTVS96/herdr-drovr
 ```
 
-Plugin manifests can't declare keybindings, so add these to `~/.config/herdr/config.toml`:
+Plugin manifests can't declare keybindings, so add these to `~/.config/herdr/config.toml` (`%APPDATA%\herdr\config.toml` on Windows):
 
 ```toml
 [[keys.command]]

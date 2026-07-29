@@ -3,7 +3,7 @@ name = "drovr"
 version = "0.4.8"
 min_herdr_version = "0.7.4"
 description = "Drive your herd: move the focused tab or pane, live agents included, anywhere with an fzf picker."
-platforms = ["linux", "macos"]
+platforms = ["linux", "macos", "windows"]
 
 # Headless; invoked by keybindings (see README).
 [[actions]]

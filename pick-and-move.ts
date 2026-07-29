@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const HB = process.env.HERDR_BIN_PATH || "herdr";
 
@@ -305,34 +306,68 @@ function mutedRow(label: string, token: string): string {
   return `${MUTE}${label}${UNMUTE}\t${token}`;
 }
 
-// fzf runs with --disabled and this script does the filtering (via fzf
-// --filter on reload): the ＋ sentinel rows close the list under any query,
-// echo the typed name so "＋ new tab “api”" reads as what enter will create,
-// and enter always lands on the best real match.
-function searchScript(candidatesExpr: string, sentinels: [string, string][]): string {
-  const named = sentinels
-    .map(([label, token]) => `printf '\\033[38;5;8m${label} “%s”\\033[0m\\t${token}\\n' "$q"`)
-    .join("\n  ");
-  const plain = sentinels
-    .map(([label, token]) => `printf '\\033[38;5;8m${label}\\033[0m\\t${token}\\n'`)
-    .join("\n  ");
-  return `q=$1
-f=${candidatesExpr}
-if [ -n "$q" ]; then
-  fzf --filter "$q" < "$f"
-  ${named}
-else
-  awk 1 "$f"
-  ${plain}
-fi
-exit 0
-`;
+// fzf runs with --disabled and this script does the filtering, re-invoked per
+// keystroke: the ＋ sentinel rows close the list under any query, echo the
+// typed name so "＋ new tab “api”" reads as what enter will create, and enter
+// always lands on the best real match. The reload re-runs node, not a shell
+// script, so the picker needs nothing on PATH that the plugin doesn't already
+// require — no sh, sleep, awk, or coreutils, which Windows has none of.
+interface SearchSpec {
+  candidates: string;
+  sentinels: [string, string][];
+  alt?: { candidates: string; marker: string; prompt: string; altPrompt: string };
 }
 
-// Reload on every keystroke, debounced: fzf kills the pending reload when the
-// next change fires, so the sleep coalesces fast typing into one search.
-function reloadOnChange(searchSh: string): string[] {
-  return ["--bind", `change:reload(sleep 0.05; sh '${searchSh}' {q})`];
+// An extended-length prefix reaches argv when herdr resolves the plugin root
+// through \\?\, and it does not survive a round trip back through a shell.
+const SELF = import.meta.filename.replace(/^\\\\\?\\/, "");
+// Re-invocations carry the bytecode cache too; without it each keystroke pays
+// ~35ms to compile this file again.
+const COMPILE_CACHE = pathToFileURL(path.join(import.meta.dirname, "compile-cache.js")).href;
+
+function readSearchSpec(specPath: string): SearchSpec {
+  return JSON.parse(fs.readFileSync(specPath, "utf8")) as SearchSpec;
+}
+
+function writeMatchingRows(specPath: string, query: string): void {
+  const spec = readSearchSpec(specPath);
+  const file = spec.alt && fs.existsSync(spec.alt.marker) ? spec.alt.candidates : spec.candidates;
+  const candidates = fs.readFileSync(file, "utf8");
+  const matched = query
+    ? spawnSync("fzf", ["--filter", query], { input: candidates, encoding: "utf8" }).stdout || ""
+    : candidates;
+  const rows = matched.split("\n").filter((line) => line.length > 0);
+  for (const [label, token] of spec.sentinels) {
+    rows.push(mutedRow(query ? `${label} “${query}”` : label, token));
+  }
+  process.stdout.write(`${rows.join("\n")}\n`);
+}
+
+// Flips the marker the next reload reads, and hands fzf the matching prompt.
+function writeScopeToggle(specPath: string): void {
+  const alt = readSearchSpec(specPath).alt;
+  if (!alt) return;
+  if (fs.existsSync(alt.marker)) {
+    fs.rmSync(alt.marker);
+    process.stdout.write(`change-prompt(${alt.prompt})`);
+  } else {
+    fs.writeFileSync(alt.marker, "");
+    process.stdout.write(`change-prompt(${alt.altPrompt})`);
+  }
+}
+
+function nodeCommand(subcommand: string, specPath: string): string {
+  return `node --import "${COMPILE_CACHE}" "${SELF}" ${subcommand} "${specPath}"`;
+}
+
+function searchCommand(specPath: string): string {
+  return `${nodeCommand("--search", specPath)} {q}`;
+}
+
+// Reload on every keystroke: fzf kills the pending reload when the next change
+// fires, and node's startup coalesces fast typing into one search.
+function reloadOnChange(specPath: string): string[] {
+  return ["--bind", `change:reload(${searchCommand(specPath)})`];
 }
 
 interface FzfPick {
@@ -340,8 +375,9 @@ interface FzfPick {
   stdout: string;
 }
 
-// fzf draws on /dev/tty, leaving stdin/stdout free for candidates and the
-// pick; --with-nth=1 hides the tab-delimited token column.
+// fzf draws straight on the terminal (/dev/tty, the console on Windows),
+// leaving stdin/stdout free for candidates and the pick; --with-nth=1 hides
+// the tab-delimited token column.
 function runFzf(args: string[], input: string): FzfPick {
   const fzf = spawnSync("fzf", args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] });
   if (fzf.error) {
@@ -370,9 +406,12 @@ function moveTabFlow(srcPane: string): number {
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drovr-"));
   const wsPath = path.join(dir, "workspaces.txt");
-  const searchSh = path.join(dir, "search.sh");
+  const specPath = path.join(dir, "search.json");
   fs.writeFileSync(wsPath, wsRows.join("\n"));
-  fs.writeFileSync(searchSh, searchScript(`'${wsPath}'`, [["＋ new workspace", NEW_WS_TOKEN]]));
+  fs.writeFileSync(
+    specPath,
+    JSON.stringify({ candidates: wsPath, sentinels: [["＋ new workspace", NEW_WS_TOKEN]] })
+  );
 
   let fzf: FzfPick;
   try {
@@ -385,7 +424,7 @@ function moveTabFlow(srcPane: string): number {
         "--with-nth", "1",
         "--print-query",
         "--disabled",
-        ...reloadOnChange(searchSh),
+        ...reloadOnChange(specPath),
       ],
       [...wsRows, mutedRow("＋ new workspace", NEW_WS_TOKEN)].join("\n")
     );
@@ -462,27 +501,30 @@ function movePaneFlow(srcPane: string): number {
   const allLines = paneDestLines(tabs, workspaces, src.tab_id, src.workspace_id, true);
 
   // ctrl-t toggles between the scoped and cross-workspace lists: a marker
-  // file carries the state, the search script picks the file per reload. The
-  // candidate files hold only real tabs; the script owns the sentinels.
+  // file carries the state, the search picks the file per reload. The
+  // candidate files hold only real tabs; the search owns the sentinels.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drovr-"));
   const scopedPath = path.join(dir, "scoped.txt");
   const allPath = path.join(dir, "all.txt");
-  const allOn = path.join(dir, "all-on");
-  const searchSh = path.join(dir, "search.sh");
+  const specPath = path.join(dir, "search.json");
   fs.writeFileSync(scopedPath, currentLines.join("\n"));
   fs.writeFileSync(allPath, allLines.join("\n"));
   fs.writeFileSync(
-    searchSh,
-    searchScript(`$(if test -e '${allOn}'; then echo '${allPath}'; else echo '${scopedPath}'; fi)`, [
-      ["＋ new tab", NEW_TAB_TOKEN],
-      ["＋ new workspace", NEW_WS_TOKEN],
-    ])
+    specPath,
+    JSON.stringify({
+      candidates: scopedPath,
+      sentinels: [
+        ["＋ new tab", NEW_TAB_TOKEN],
+        ["＋ new workspace", NEW_WS_TOKEN],
+      ],
+      alt: {
+        candidates: allPath,
+        marker: path.join(dir, "all-on"),
+        prompt: "move pane to › ",
+        altPrompt: "move pane anywhere › ",
+      },
+    })
   );
-  // transform[] (bracket delimiter: the body nests parens) flips the marker
-  // and prompt; the chained reload then re-filters against the new scope.
-  const toggle =
-    `if test -e '${allOn}'; then rm '${allOn}'; echo 'change-prompt(move pane to › )'; ` +
-    `else touch '${allOn}'; echo 'change-prompt(move pane anywhere › )'; fi`;
   let fzf: FzfPick;
   try {
     fzf = runFzf(
@@ -495,8 +537,10 @@ function movePaneFlow(srcPane: string): number {
         "--print-query",
         "--disabled",
         "--expect", "alt-d",
-        ...reloadOnChange(searchSh),
-        "--bind", `ctrl-t:transform[${toggle}]+reload(sh '${searchSh}' {q})`,
+        ...reloadOnChange(specPath),
+        // transform[] (bracket delimiter: the body nests parens) flips the
+        // marker and prompt; the chained reload re-filters the new scope.
+        "--bind", `ctrl-t:transform[${nodeCommand("--toggle", specPath)}]+reload(${searchCommand(specPath)})`,
       ],
       [...currentLines, mutedRow("＋ new tab", NEW_TAB_TOKEN), mutedRow("＋ new workspace", NEW_WS_TOKEN)].join("\n")
     );
@@ -546,13 +590,18 @@ function main(): number {
   return mode === "pane" ? movePaneFlow(pane) : moveTabFlow(pane);
 }
 
-export { rootFromFlatSnapshot, secondChildRect, anchorOf, leavesOf, paneDestLines, parsePaneChoice, searchScript };
+export { rootFromFlatSnapshot, secondChildRect, anchorOf, leavesOf, paneDestLines, parsePaneChoice };
 
+// --search / --toggle are fzf's reload and transform re-entering this file;
+// they exit naturally so their stdout flushes before the process ends.
 if (process.argv[1] === import.meta.filename) {
+  const [, , subcommand, specPath = "", query = ""] = process.argv;
   try {
-    process.exit(main());
+    if (subcommand === "--search") writeMatchingRows(specPath, query);
+    else if (subcommand === "--toggle") writeScopeToggle(specPath);
+    else process.exit(main());
   } catch (err) {
-    keepPickerOpenUntilEnter(`drovr: ${errorMessage(err)}`);
+    if (!subcommand) keepPickerOpenUntilEnter(`drovr: ${errorMessage(err)}`);
     process.exit(1);
   }
 }
