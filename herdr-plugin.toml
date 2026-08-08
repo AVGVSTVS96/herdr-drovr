@@ -18,11 +18,11 @@ title = "Move pane to tab…"
 contexts = ["pane"]
 command = ["node", "--import", "./compile-cache.js", "open-picker.ts", "pane"]
 
-# Defaults only; open-picker.ts sizes each open to fit its list.
+# Keep direct opens consistent with the action-launched picker.
 [[panes]]
 id = "picker"
 title = "drovr"
 placement = "popup"
 width = 64
-height = 18
+height = 28
 command = ["node", "--import", "./compile-cache.js", "pick-and-move.ts"]

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // Headless action behind the keybindings: resolves the focused pane and
-// opens the floating picker, sized to its content, with the move context
-// in its environment.
+// opens the floating picker with the move context in its environment.
 //
 // Modes (argv[2]): "tab" moves the pane's whole tab; "pane" moves just the pane.
 
@@ -22,24 +21,10 @@ function herdrJSON<T>(args: string[]): { result: T } {
   return JSON.parse(r.stdout) as { result: T };
 }
 
-// Popup outer size: command-palette width, height fitted to the largest list
-// this run can show (ctrl-t widens the pane list, and popups don't resize
-// once open). Any listing failure falls back to the manifest defaults.
+// A stable command-palette size leaves breathing room for short lists; fzf
+// scrolls longer lists within the same viewport.
 const WIDTH = 64;
-// Popup border + fzf padding + prompt + separator, plus the key hints
-// (4 lines in pane mode, 2 in tab mode).
-function chrome(mode: string): number {
-  return 6 + (mode === "pane" ? 4 : 2);
-}
-
-function listRows(mode: string): number {
-  if (mode === "pane") {
-    // All tabs minus the source, plus the two sentinel rows.
-    return herdrJSON<{ tabs: unknown[] }>(["tab", "list"]).result.tabs.length + 1;
-  }
-  // Workspaces minus the source, plus the new-workspace sentinel.
-  return herdrJSON<{ workspaces: unknown[] }>(["workspace", "list"]).result.workspaces.length;
-}
+const HEIGHT = 28;
 
 try {
   const mode = process.argv[2] === "pane" ? "pane" : "tab";
@@ -54,19 +39,14 @@ try {
     pane = focused.pane_id;
   }
 
-  const sizeArgs: string[] = [];
-  try {
-    const height = Math.min(Math.max(listRows(mode) + chrome(mode), 13), 28);
-    sizeArgs.push("--width", String(WIDTH), "--height", String(height));
-  } catch {}
-
   const open = spawnSync(
     HB,
     [
       "plugin", "pane", "open",
       "--plugin", pluginId,
       "--entrypoint", "picker",
-      ...sizeArgs,
+      "--width", String(WIDTH),
+      "--height", String(HEIGHT),
       "--env", `DROVR_MODE=${mode}`,
       "--env", `DROVR_PANE=${pane}`,
     ],
