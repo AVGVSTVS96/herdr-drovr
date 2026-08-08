@@ -1,8 +1,10 @@
 # drovr
 
-A [drover](https://en.wikipedia.org/wiki/Drover_(Australian)) moves herds between places. **drovr** does the same for your [herdr](https://herdr.dev) panes: move the focused **tab** to another workspace, or the focused **pane** into any tab, split layout **and** live agents included, picked with `fzf` in a floating panel.
+A [drover](https://en.wikipedia.org/wiki/Drover_(Australian)) moves herds between places. **drovr** does the same for your [herdr](https://herdr.dev) panes and tabs: move tabs to other workspaces, panes to other tabs -- supports split layout for pane moves. Powered by `fzf` in a floating panel.
 
 Herdr has no built-in "move tab to workspace". Recreating a tab by reapplying its layout would respawn every pane, killing running Claude/Pi sessions and shells. drovr relocates the *live* panes instead (`herdr pane move`), so everything keeps running exactly where it left off.
+
+<img width="1104" height="640" alt="image" src="https://github.com/user-attachments/assets/3f5fecde-85fd-4221-b994-e3c54d16305d" />
 
 <!-- TODO: record a short demo and drop it in ./assets/demo.gif
 ![demo](./assets/demo.gif)
