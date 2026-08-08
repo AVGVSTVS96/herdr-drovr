@@ -1,38 +1,34 @@
 # drovr
 
-A [drover](https://en.wikipedia.org/wiki/Drover_(Australian)) moves herds between places. **drovr** does the same for your [herdr](https://herdr.dev) panes and tabs: move tabs to other workspaces, panes to other tabs -- supports split layout for pane moves. Powered by `fzf` in a floating panel.
+A [drover](https://en.wikipedia.org/wiki/Drover_(Australian)) moves herds between places. **drovr** does the same for your [herdr](https://herdr.dev) panes and tabs: move the focused tab to another workspace, or the focused pane into any tab, from a fuzzy picker in a floating popup.
 
-Herdr has no built-in "move tab to workspace". Recreating a tab by reapplying its layout would respawn every pane, killing running Claude/Pi sessions and shells. drovr relocates the *live* panes instead (`herdr pane move`), so everything keeps running exactly where it left off.
+Herdr has no built-in "move tab to workspace", and recreating a tab by replaying its layout would respawn every pane, killing running agents and shells. drovr relocates the *live* panes instead (`herdr pane move`), so everything keeps running exactly where it left off.
 
-<img width="1104" height="640" alt="image" src="https://github.com/user-attachments/assets/3f5fecde-85fd-4221-b994-e3c54d16305d" />
-
-<!-- TODO: record a short demo and drop it in ./assets/demo.gif
-![demo](./assets/demo.gif)
--->
+<img width="1104" height="640" alt="drovr picker" src="https://github.com/user-attachments/assets/3f5fecde-85fd-4221-b994-e3c54d16305d" />
 
 ## Features
 
-- 🚚 **Move tabs**: label, split layout, and every running pane relocate to another workspace
-- 📦 **Move panes**: send the focused pane into any tab, split right or down, or into a fresh tab/workspace
-- 🤖 Live agents survive every move: panes are relocated, never respawned
-- 🎈 Floating `fzf` picker: type to filter, `enter` to move, `esc` to cancel; the tiled layout never shifts
-- 🌐 `ctrl-t` in the pane picker toggles every workspace's tabs as destinations
-- 🎯 Focus follows the move: you land where your pane or tab just arrived
-- ✅ Every move is verified against the server; failures surface right in the picker
+- 🚚 **Move tabs** -- label, split layout, and every running pane relocate to another workspace
+- 📦 **Move panes** -- send the focused pane into any tab, split right or down, or into a fresh tab or workspace
+- 🤖 **Live agents survive** -- panes are relocated, never respawned
+- 🎈 **Floating picker** -- theme-matched fzf popup; the tiled layout never shifts
+- 🌐 **Cross-workspace** -- `ctrl-t` in the pane picker opens every workspace's tabs as destinations
+- 🎯 **Focus follows** -- you land where your pane or tab just arrived
+- ✅ **Verified moves** -- every move is checked against the server; failures surface right in the picker
 
 ## Requirements
 
-- Herdr `>= 0.7.4` (the picker is a floating popup panel, introduced in 0.7.4)
-- `node >= 23` on `PATH` (the plugin is written in TypeScript and relies on Node's native type stripping to run the `.ts` files directly; there is no build step)
-- `fzf` on `PATH` (`brew install fzf` on macOS)
+- **herdr** `>= 0.7.4` -- the picker uses floating popup panels
+- **node** `>= 23` -- runs the TypeScript sources directly via native type stripping; no build step
+- **fzf** on `PATH` -- `brew install fzf` on macOS
 
-## Installation
+## Install
 
 ```bash
 herdr plugin install AVGVSTVS96/herdr-drovr
 ```
 
-Plugin manifests can't declare keybindings, so add these to `~/.config/herdr/config.toml`:
+Herdr keybindings live in your config, not the plugin manifest, so add these to `~/.config/herdr/config.toml`:
 
 ```toml
 [[keys.command]]
@@ -48,53 +44,38 @@ command = "drovr.move-pane"
 description = "move pane to tab"
 ```
 
-Then reload Herdr config:
+Then reload:
 
 ```bash
 herdr server reload-config
 ```
 
-That's it.
-
 ## Usage
 
-### Move a tab
+**Move a tab** -- focus it, press `prefix+M`, pick a destination workspace.
 
-1. Focus the tab you want to move
-2. Press `prefix+M`
-3. Pick a destination workspace, or choose `＋ new workspace` (a typed query becomes its name)
+**Move a pane** -- focus it, press `prefix+m`, pick a destination tab.
 
-### Move a pane
+| key | action |
+| --- | --- |
+| type | filter destinations |
+| `enter` | move (pane moves split **right**) |
+| `alt-d` | move, splitting **down** (pane picker) |
+| `ctrl-t` | toggle every workspace's tabs (pane picker) |
+| `esc` | cancel |
 
-1. Focus the pane you want to move
-2. Press `prefix+m`
-3. Pick a destination tab, `＋ new tab`, or `＋ new workspace`
-
-Pane picker keys:
-
-- `type` - filter destinations
-- `enter` - move, splitting the destination's focused pane **right**
-- `alt-d` - move, splitting **down** instead
-- `ctrl-t` - toggle between the current workspace's tabs and every workspace's
-- `esc` - cancel
-
-Picking a `＋ new tab` / `＋ new workspace` row with a query typed uses the query as the new tab or workspace name - the row previews it live (`＋ new tab "api"`). The `＋` rows survive any query, sitting below real matches so `enter` still lands on the best match.
-
-The picker is keyboard-driven (fzf semantics): a single mouse click only highlights a row. If the source tab or workspace becomes empty after a move, Herdr closes it.
+Both pickers always offer `＋ new tab` / `＋ new workspace` rows below the real matches. A typed query becomes the new name, previewed live (`＋ new tab "api"`), while `enter` still lands on the best real match. If a move leaves the source tab or workspace empty, herdr closes it.
 
 ## How it works
 
-- `open-picker.ts` runs as the headless plugin action: it resolves the focused pane and opens the picker popup with the move context (`DROVR_MODE`, `DROVR_PANE`) in its environment.
-- `pick-and-move.ts` runs inside the popup, so `fzf` has a real TTY. A popup is a session resource, not a pane in the source tab, so nothing pins the source layout and the moves run **inline right after the pick**, no second process, no retries.
-- Tab moves reconstruct the layout tree from the rects Herdr actually reported (no ratio arithmetic), re-validate that every source pane still exists after the pick, then replay the tree in the destination: one `pane move --new-tab`/`--new-workspace` for the anchor, then one `pane move --split` per split node with the exact direction and ratio.
-- Pane moves are a single `pane move --tab <id> --split right|down`. `--target-pane` is omitted, which splits the destination tab's focused pane, the intuitive landing spot.
-- The destination is focused as soon as it exists, so it is front and center the instant the popup closes.
+Two scripts, zero runtime dependencies:
 
-## Limitations
+- **`open-picker.ts`** runs headless behind the keybinding: it resolves the focused pane and opens the picker popup with the move context in its environment.
+- **`pick-and-move.ts`** runs inside the popup, where fzf has a real TTY. A popup is a session resource, not a pane in the source tab, so nothing pins the source layout and the moves run inline right after the pick.
 
-- The picker is a floating terminal popup, not a native menu; Herdr plugin v1 has no native UI or menu injection.
-- There is no atomic `tab move` API, so a tab move is multiple `pane move` calls. Source panes are re-validated right before moving, but if a move still fails partway the plugin reports the failing command and does not roll back.
-- The tab picker excludes the source workspace; the pane picker excludes the source tab.
+A tab move reconstructs the layout tree from the rects herdr actually reported (no ratio arithmetic), re-validates that every source pane still exists after the pick, then replays the tree in the destination: one `pane move --new-tab`/`--new-workspace` for the anchor, then one `pane move --split` per split node with the exact direction and ratio. A pane move is a single `pane move --tab <id> --split right|down` into the destination's focused pane. Either way, the destination is focused the instant the popup closes.
+
+There is no atomic `tab move` API, so a tab move is several `pane move` calls. Sources are re-validated right before moving; if a move still fails partway, drovr reports the failing command and does not roll back.
 
 ## Development
 
@@ -102,8 +83,9 @@ The picker is keyboard-driven (fzf semantics): a single mouse click only highlig
 git clone https://github.com/AVGVSTVS96/herdr-drovr
 herdr plugin link ./herdr-drovr
 herdr plugin action list --plugin drovr
-npm install   # dev-only: typescript for typechecking (the plugin itself has zero dependencies)
-npm test      # runs tsc --noEmit, then the layout-tree and picker-parsing tests
+
+npm install   # dev-only: typescript for typechecking
+npm test      # tsc --noEmit, then the layout-tree and picker-parsing tests
 ```
 
 ## License
